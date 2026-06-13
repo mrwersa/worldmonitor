@@ -1,0 +1,113 @@
+{
+  "initial": {
+    "name": "desktop-tabs-initial",
+    "shotPath": "/private/tmp/worldmonitor-pr4300-review/screenshots/desktop-tabs-initial.png",
+    "tabbarPath": "/private/tmp/worldmonitor-pr4300-review/screenshots/desktop-tabs-initial-tabbar.png",
+    "before": {
+      "enabledCount": 0,
+      "enabledKeys": [],
+      "tabs": [
+        "Main"
+      ]
+    },
+    "after": {
+      "enabledCount": 0,
+      "enabledKeys": [],
+      "tabs": [
+        "Main"
+      ]
+    }
+  },
+  "afterAdd": {
+    "name": "desktop-after-add-tab-free-count",
+    "shotPath": "/private/tmp/worldmonitor-pr4300-review/screenshots/desktop-after-add-tab-free-count.png",
+    "tabbarPath": "/private/tmp/worldmonitor-pr4300-review/screenshots/desktop-after-add-tab-free-count-tabbar.png",
+    "before": {
+      "enabledCount": 0,
+      "enabledKeys": [],
+      "tabs": [
+        "Main"
+      ]
+    },
+    "after": {
+      "enabledCount": 81,
+      "enabledKeys": [
+        "map",
+        "live-news",
+        "live-webcams",
+        "insights",
+        "threat-timeline",
+        "strategic-posture",
+        "forecast",
+        "cii",
+        "strategic-risk",
+        "intel",
+        "gdelt-intel",
+        "cascade",
+        "military-correlation",
+        "escalation-correlation",
+        "economic-correlation",
+        "disaster-correlation",
+        "politics",
+        "us",
+        "europe",
+        "middleeast",
+        "africa",
+        "latam",
+        "asia",
+        "energy",
+        "gov",
+        "thinktanks",
+        "polymarket",
+        "commodities",
+        "energy-complex",
+        "oil-inventories"
+      ],
+      "tabs": [
+        "Main",
+        "New Tab"
+      ]
+    }
+  },
+  "mobile": {
+    "name": "mobile-tabs-initial",
+    "shotPath": "/private/tmp/worldmonitor-pr4300-review/screenshots/mobile-tabs-initial.png",
+    "tabbarPath": "/private/tmp/worldmonitor-pr4300-review/screenshots/mobile-tabs-initial-tabbar.png",
+    "before": {
+      "enabledCount": 0,
+      "enabledKeys": [],
+      "tabs": [
+        "Main"
+      ]
+    },
+    "after": {
+      "enabledCount": 0,
+      "enabledKeys": [],
+      "tabs": [
+        "Main"
+      ]
+    }
+  },
+  "consoleTail": [
+    "[mobile-tabs-initial] log: [Map] Rendering earthquakes. Total: 0 Layer enabled: true",
+    "[mobile-tabs-initial] log: [Map] After time filter: 0 earthquakes. TimeRange: 7d",
+    "[mobile-tabs-initial] log: [Map] Actually rendered 0 earthquake markers",
+    "[mobile-tabs-initial] log: [StrategicRiskPanel] Using cached scores from backend",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"politics\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"us\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"europe\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"middleeast\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"tech\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"ai\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"finance\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"gov\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"layoffs\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"thinktanks\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"crisis\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"africa\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"latam\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"asia\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Digest missing for \"energy\", limited per-feed fallback disabled",
+    "[mobile-tabs-initial] warning: [News] Intel digest missing, limited per-feed fallback disabled"
+  ]
+}
