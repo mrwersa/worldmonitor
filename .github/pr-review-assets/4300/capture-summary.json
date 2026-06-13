@@ -88,6 +88,7 @@
       ]
     }
   },
+  "publishedAssetNote": "The GitHub review PNG assets were updated after initial publication so the embedded images use the focused tab-strip captures rather than map-heavy full-page screenshots.",
   "consoleTail": [
     "[mobile-tabs-initial] log: [Map] Rendering earthquakes. Total: 0 Layer enabled: true",
     "[mobile-tabs-initial] log: [Map] After time filter: 0 earthquakes. TimeRange: 7d",
