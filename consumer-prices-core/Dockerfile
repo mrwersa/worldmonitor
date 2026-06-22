@@ -1,9 +1,18 @@
 FROM node:20-slim AS base
 WORKDIR /app
 
+# Patch the base image's pre-installed OS packages before adding our own.
+# `node:20-slim` ships system libraries (e.g. libgnutls30) that `apt-get install`
+# never touches because they're already present, so they stay pinned to whatever
+# the base tag shipped. An explicit `apt-get upgrade` pulls Debian's security
+# point-releases (libgnutls30 -> 3.7.9-2+deb12u7), which clears the critical
+# GnuTLS CVEs Snyk reports against this image.
+#
 # Install Playwright dependencies. Tolerate transient Ubuntu mirror failures
 # (2026-04-17: noble-security CDN hash-sum mismatch blocked all Railway builds).
-RUN (apt-get update || true) && apt-get install -y --fix-missing \
+RUN (apt-get update || true) \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --fix-missing \
     chromium \
     fonts-liberation \
     libatk-bridge2.0-0 \
