@@ -17,6 +17,11 @@
 
 import { escapeHtml } from '@/utils/sanitize';
 
+const VIRTUALIZE_ROW_THRESHOLD = 100;
+const VIRTUAL_ROW_HEIGHT_PX = 33;
+const VIRTUAL_VISIBLE_ROWS = 32;
+const VIRTUAL_OVERSCAN_ROWS = 6;
+
 export interface WatchlistColumn<T> {
   // Stable HTML-attribute-safe key. Used in data-sortkey attributes.
   key: string;
@@ -74,6 +79,8 @@ export class WatchlistTableView<T> {
     filter: string;
     search: string;
     expandedKey: string | null;
+    virtualStart: number;
+    virtualScrollTop: number;
   };
 
   constructor(private config: WatchlistConfig<T>) {
@@ -82,6 +89,8 @@ export class WatchlistTableView<T> {
       filter: config.defaultFilter,
       search: '',
       expandedKey: null,
+      virtualStart: 0,
+      virtualScrollTop: 0,
     };
   }
 
@@ -113,9 +122,7 @@ export class WatchlistTableView<T> {
       ? `<div class="watchlist-intro">${this.config.intro}</div>`
       : '';
     const controls = this.renderControls();
-    const tableBody = list.length === 0
-      ? `<tr><td colspan="${this.config.columns.length}" class="watchlist-empty">${escapeHtml(this.config.emptyMessage || 'No symbols match the current filter.')}</td></tr>`
-      : list.map((item) => this.renderRow(item)).join('');
+    const tableBody = this.renderTableBody(list);
     const headers = this.config.columns.map((col) => {
       const sortKey = col.sortable ? (col.sortOptionKey || col.key) : '';
       // Build a SINGLE class string — pre-fix this code emitted two
@@ -132,15 +139,60 @@ export class WatchlistTableView<T> {
       return `<th${classAttr}${sortAttr}>${escapeHtml(col.label)}${activeSortIndicator}</th>`;
     }).join('');
     return `
-      <div class="watchlist-table-view">
+      <div class="watchlist-table-view" data-watchlist-totalrows="${list.length}" data-watchlist-renderedrows="${this.getRenderedRowCount(list)}">
         ${intro}
         ${controls}
-        <table class="watchlist-table">
-          <thead><tr>${headers}</tr></thead>
-          <tbody>${tableBody}</tbody>
-        </table>
+        <div class="watchlist-table-scroll" data-watchlist-scroll="1">
+          <table class="watchlist-table">
+            <thead><tr>${headers}</tr></thead>
+            <tbody>${tableBody}</tbody>
+          </table>
+        </div>
       </div>
     `;
+  }
+
+  private renderTableBody(list: T[]): string {
+    if (list.length === 0) {
+      return `<tr><td colspan="${this.config.columns.length}" class="watchlist-empty">${escapeHtml(this.config.emptyMessage || 'No symbols match the current filter.')}</td></tr>`;
+    }
+    if (!this.shouldVirtualize(list)) {
+      return list.map((item) => this.renderRow(item)).join('');
+    }
+
+    const start = this.getClampedVirtualStart(list);
+    const end = Math.min(list.length, start + VIRTUAL_VISIBLE_ROWS + VIRTUAL_OVERSCAN_ROWS * 2);
+    const topSpacerRows = start;
+    const bottomSpacerRows = Math.max(0, list.length - end);
+    const topSpacer = this.renderSpacerRow(topSpacerRows, 'top');
+    const rows = list.slice(start, end).map((item) => this.renderRow(item)).join('');
+    const bottomSpacer = this.renderSpacerRow(bottomSpacerRows, 'bottom');
+    return `${topSpacer}${rows}${bottomSpacer}`;
+  }
+
+  private renderSpacerRow(rowCount: number, position: 'top' | 'bottom'): string {
+    if (rowCount <= 0) return '';
+    const height = rowCount * VIRTUAL_ROW_HEIGHT_PX;
+    return `<tr class="watchlist-virtual-spacer watchlist-virtual-spacer-${position}" aria-hidden="true"><td colspan="${this.config.columns.length}" style="height:${height}px;padding:0;border:0"></td></tr>`;
+  }
+
+  private shouldVirtualize(list: T[]): boolean {
+    return list.length > VIRTUALIZE_ROW_THRESHOLD;
+  }
+
+  private getClampedVirtualStart(list: T[]): number {
+    if (!this.shouldVirtualize(list)) return 0;
+    const maxStart = Math.max(0, list.length - VIRTUAL_VISIBLE_ROWS);
+    const start = Math.min(Math.max(0, this.state.virtualStart), maxStart);
+    if (start !== this.state.virtualStart) this.state.virtualStart = start;
+    return start;
+  }
+
+  private getRenderedRowCount(list: T[]): number {
+    if (list.length === 0) return 0;
+    if (!this.shouldVirtualize(list)) return list.length;
+    const start = this.getClampedVirtualStart(list);
+    return Math.min(list.length - start, VIRTUAL_VISIBLE_ROWS + VIRTUAL_OVERSCAN_ROWS * 2);
   }
 
   private renderControls(): string {
@@ -218,6 +270,7 @@ export class WatchlistTableView<T> {
         // a column wired to a sortOptionKey that's not in sortOptions).
         if (this.config.sortOptions.some((o) => o.key === key)) {
           this.state.sort = key;
+          this.resetVirtualWindow();
           onRerender();
         }
       });
@@ -229,6 +282,7 @@ export class WatchlistTableView<T> {
         const key = pillEl.dataset.filterkey || '';
         if (key && key !== this.state.filter) {
           this.state.filter = key;
+          this.resetVirtualWindow();
           onRerender();
         }
       });
@@ -239,8 +293,26 @@ export class WatchlistTableView<T> {
     if (sortSelect) {
       sortSelect.addEventListener('change', () => {
         this.state.sort = sortSelect.value;
+        this.resetVirtualWindow();
         onRerender();
       });
+    }
+
+    const scrollEl = rootEl.querySelector('[data-watchlist-scroll="1"]') as HTMLElement | null;
+    if (scrollEl) {
+      scrollEl.scrollTop = this.state.virtualScrollTop;
+      scrollEl.addEventListener('scroll', () => {
+        const list = this.getFilteredSorted();
+        if (!this.shouldVirtualize(list)) return;
+        const nextStart = Math.max(0, Math.floor(scrollEl.scrollTop / VIRTUAL_ROW_HEIGHT_PX) - VIRTUAL_OVERSCAN_ROWS);
+        if (nextStart === this.state.virtualStart) {
+          this.state.virtualScrollTop = scrollEl.scrollTop;
+          return;
+        }
+        this.state.virtualStart = nextStart;
+        this.state.virtualScrollTop = scrollEl.scrollTop;
+        onRerender();
+      }, { passive: true });
     }
 
     // Search input — focus restored after rerender (setContent destroys
@@ -261,6 +333,7 @@ export class WatchlistTableView<T> {
       }
       searchInput.addEventListener('input', () => {
         this.state.search = searchInput.value;
+        this.resetVirtualWindow();
         this.searchWasFocused = true;
         onRerender();
       });
@@ -274,4 +347,9 @@ export class WatchlistTableView<T> {
   // content innerHTML, destroying focus state. Without this, typing in
   // the search box loses focus on every keystroke.
   private searchWasFocused = false;
+
+  private resetVirtualWindow(): void {
+    this.state.virtualStart = 0;
+    this.state.virtualScrollTop = 0;
+  }
 }

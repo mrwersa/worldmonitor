@@ -3121,6 +3121,11 @@ a.hub-top-story {
   border-collapse: collapse;
   font-size: 11px;
 }
+.watchlist-table-scroll {
+  max-height: min(58vh, 640px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .watchlist-table thead th {
   text-align: left;
   color: var(--text-dim);
@@ -3131,6 +3136,10 @@ a.hub-top-story {
   padding: 6px 4px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-bg, var(--bg));
 }
 .watchlist-table thead th.watchlist-th-right {
   text-align: right;
@@ -3163,6 +3172,9 @@ a.hub-top-story {
   padding: 0;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+}
+.watchlist-table tbody tr.watchlist-virtual-spacer > td {
+  pointer-events: none;
 }
 .watchlist-empty {
   padding: 24px;
