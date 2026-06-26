@@ -15,6 +15,7 @@ interface HarnessState {
   silentNoOpOpens: number;
   errorToasts: string[];
   attemptClears: string[];
+  suppressCloseEvent: boolean;
 }
 
 declare global {
@@ -95,6 +96,7 @@ function resetHarness(): void {
     silentNoOpOpens: 0,
     errorToasts: [],
     attemptClears: [],
+    suppressCloseEvent: false,
   };
   installBrowserGlobals();
 }
@@ -134,7 +136,7 @@ const stubSources: Record<string, string> = {
           const wasOpen = _overlayOpen;
           _overlayOpen = false;
           globalThis.__checkoutOverlayHarness.closeCalls += 1;
-          if (wasOpen) {
+          if (wasOpen && !globalThis.__checkoutOverlayHarness.suppressCloseEvent) {
             _onEvent?.({ event_type: 'checkout.closed', data: { message: 'Checkout closed manually' } });
           }
         },
@@ -436,11 +438,15 @@ describe('checkout overlay lifecycle', () => {
     const harness = globalThis.__checkoutOverlayHarness;
     // Reproduce the production state: checkout.opened arms the watchdog, and a
     // pending auto-resume intent is saved. link_expired must stop the running
-    // watchdog (no zombie timer) and the re-entrant checkout.closed must clear
-    // the dead-link auto-resume intent while preserving the retry attempt.
+    // watchdog (no zombie timer) and clear the dead-link auto-resume intent
+    // directly while preserving the retry attempt.
     harness.handlers[0]({ event_type: 'checkout.opened', data: {} });
     assert.equal(harness.watchdogs.length, 1, 'checkout.opened must arm the watchdog');
     globalThis.sessionStorage.setItem('wm-pending-checkout', JSON.stringify({ productId: 'prod_1' }));
+    // The merchant code must own the state cleanup. Current Dodo SDK versions
+    // synchronously re-emit checkout.closed from Checkout.close(), but
+    // link_expired recovery should not depend on that SDK lifecycle detail.
+    harness.suppressCloseEvent = true;
 
     harness.handlers[0]({ event_type: 'checkout.link_expired', data: {} });
 
@@ -463,11 +469,11 @@ describe('checkout overlay lifecycle', () => {
     // (d) the running watchdog is stopped — a leaked timer would keep polling
     //     entitlement against a dead session.
     assert.equal(harness.watchdogs[0].stopCalls, 1, 'link_expired must stop the running watchdog');
-    // (e) the re-entrant checkout.closed cleared the dead-link auto-resume intent.
+    // (e) the link_expired branch itself cleared the dead-link auto-resume intent.
     assert.equal(
       globalThis.sessionStorage.getItem('wm-pending-checkout'),
       null,
-      'link_expired must clear the pending auto-resume intent for the expired link',
+      'link_expired must clear the pending auto-resume intent without relying on checkout.closed',
     );
   });
 

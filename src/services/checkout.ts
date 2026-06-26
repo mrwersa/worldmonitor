@@ -424,11 +424,13 @@ async function ensureCheckoutOverlayInitialized(): Promise<void> {
           // failure-retry banner re-opens the exact product), mirroring
           // checkout.closed's "preserve the attempt for retry" rule.
           //
-          // safeCloseOverlay() re-emits checkout.closed synchronously through
-          // this same handler (stopWatchdog + clearPendingCheckoutIntent, both
-          // idempotent), so the error-surface calls below intentionally run
-          // AFTER it — do not reorder them above safeCloseOverlay().
+          // Clear the dead auto-resume intent directly. Do not depend on
+          // Checkout.close() re-emitting checkout.closed: current SDK versions
+          // do that synchronously, but this state transition is ours to own.
+          // LAST_CHECKOUT_ATTEMPT_KEY is intentionally preserved above for the
+          // retry CTA.
           stopWatchdog();
+          clearPendingCheckoutIntent();
           safeCloseOverlay();
           // If the session already resolved to success, the iframe we just
           // tore down was a stale post-success overlay (checkout.status=
