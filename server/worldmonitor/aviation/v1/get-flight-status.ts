@@ -6,6 +6,7 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/aviation/v1/service_server';
 import { cachedFetchJson } from '../../../_shared/redis';
 import { getRelayBaseUrl, getRelayHeaders } from './_shared';
+import { reserveAviationStackCalls } from './_avstack-budget';
 
 const CACHE_TTL = 120; // 2 minutes
 
@@ -72,6 +73,12 @@ export async function getFlightStatus(
                 const relayBase = getRelayBaseUrl();
                 if (!relayBase) {
                     return { flights: [], source: 'no-relay' };
+                }
+
+                // Monthly quota guard — once the request-time budget is spent,
+                // serve empty (cached briefly) rather than calling upstream.
+                if (!(await reserveAviationStackCalls(1, 'request'))) {
+                    return { flights: [], source: 'budget' };
                 }
 
                 const params = new URLSearchParams({

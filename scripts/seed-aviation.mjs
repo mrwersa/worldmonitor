@@ -1151,6 +1151,55 @@ async function intlIsFresh() {
   }
 }
 
+// Monthly AviationStack budget backstop. Mirrors reserveAviationStackCalls() in
+// server/worldmonitor/aviation/v1/_shared.ts — SAME Redis key + env names so the
+// seeder and the request-time RPCs share one counter and one hard ceiling.
+// Keep the two in lockstep. 'seed' kind reserves against the full
+// AVIATIONSTACK_MONTHLY_BUDGET; request-time stops earlier (see _shared.ts),
+// reserving headroom for this curated feed.
+function avstackMonthlyBudget() {
+  const raw = Number(process.env.AVIATIONSTACK_MONTHLY_BUDGET ?? 130_000);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 130_000;
+}
+
+async function reserveAviationStackBudget(count) {
+  const cap = avstackMonthlyBudget();
+  if (cap <= 0 || count <= 0) return true; // disabled
+  const { url, token } = getRedisCredentials();
+  if (!url || !token) return true; // fail-open (gate already bounds spend)
+  const now = new Date();
+  const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const key = `aviation:avstack:calls:${ym}`;
+  const ttl = 40 * 24 * 60 * 60; // 40d
+  try {
+    const resp = await fetch(`${url}/pipeline`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([['INCRBY', key, count], ['EXPIRE', key, ttl]]),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) return true; // fail-open
+    const results = await resp.json();
+    const total = Number(results?.[0]?.result);
+    if (!Number.isFinite(total)) return true;
+    if (total > cap) {
+      // Return the reservation so the counter reflects calls actually made.
+      try {
+        await fetch(`${url}/pipeline`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify([['DECRBY', key, count]]),
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch {}
+      return false;
+    }
+    return true;
+  } catch {
+    return true; // fail-open
+  }
+}
+
 async function fetchIntl() {
   const result = await seedIntlDelays();
   if (!result.healthy || result.skipped) {
@@ -1219,6 +1268,22 @@ async function main() {
     console.log(
       `[Intl] SKIPPED AviationStack fetch — last publish < ${INTL_MIN_REFRESH_MIN}min old; ` +
       `saved ${AVIATIONSTACK_LIST.length} API call(s), extended TTLs on last-good.`,
+    );
+    process.exit(0);
+  }
+
+  // Monthly budget backstop — reserve this tick's batch (one call per airport)
+  // against the shared AviationStack counter. If we'd breach the monthly
+  // ceiling, skip the fetch and serve last-good, same as the freshness gate.
+  // Belt-and-braces: the freshness gate already bounds normal spend; this caps
+  // the worst case (misconfigured gate, traffic spike on the shared counter).
+  // Only reserve when a key is present — seedIntlDelays no-ops without one, so
+  // reserving would overcount calls that never happen.
+  if (process.env.AVIATIONSTACK_API && !(await reserveAviationStackBudget(AVIATIONSTACK_LIST.length))) {
+    await extendExistingTtl([INTL_KEY, INTL_META_KEY], INTL_TTL);
+    console.log(
+      `[Intl] SKIPPED AviationStack fetch — monthly budget (${avstackMonthlyBudget()}) reached; ` +
+      `extended TTLs on last-good.`,
     );
     process.exit(0);
   }
