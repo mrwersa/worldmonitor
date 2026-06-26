@@ -96,6 +96,14 @@ describe('aviation budget: reserveAviationStackCalls enforces ceilings', () => {
     assert.equal(fetchMock.mock.callCount(), 0, 'disabled cap must not touch Redis');
   });
 
+  it('treats blank budget env vars as unset defaults, not disabled', async () => {
+    process.env.AVIATIONSTACK_MONTHLY_BUDGET = ' ';
+    process.env.AVIATIONSTACK_REQUEST_BUDGET = '';
+
+    assert.equal(await reserveAviationStackCalls(1, 'request'), true);
+    assert.equal(counter, 1, 'blank budget env vars should still reserve against Redis');
+  });
+
   it('fails open when Redis is unreachable (never blanks the panel on a blip)', async () => {
     process.env.AVIATIONSTACK_MONTHLY_BUDGET = '10';
     mock.restoreAll();
@@ -252,6 +260,13 @@ describe('aviation budget: seeder helpers behave', () => {
     const state = mockBudgetCounter();
     assert.equal(await reserveAviationStackBudget(999), true);
     assert.equal(state.counter, 0);
+  });
+
+  it('treats a blank MONTHLY budget as unset default, not disabled', async () => {
+    process.env.AVIATIONSTACK_MONTHLY_BUDGET = ' ';
+    const state = mockBudgetCounter();
+    assert.equal(await reserveAviationStackBudget(50), true);
+    assert.equal(state.counter, 50, 'blank monthly budget should still reserve against Redis');
   });
 
   it('fails open when the budget pipeline throws', async () => {

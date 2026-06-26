@@ -64,6 +64,13 @@ const NOTAM_TTL     = 7_200;  // 2h
 const NEWS_TTL      = 2_400;  // 40min
 const BOOTSTRAP_TTL = 7_200;  // 2h — matches FAA/NOTAM; survives ~4 missed cron ticks
 
+function nonNegativeEnv(name, fallback) {
+  const value = process.env[name]?.trim();
+  if (!value) return fallback;
+  const raw = Number(value);
+  return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
+}
+
 // AviationStack quota guard. AviationStack is a PAID, per-airport API: one call
 // per airport (~55 today) on EVERY cron tick, with no upstream batching. Intl
 // airport-delay data moves slowly (already cached 30min client-side, 3h Redis
@@ -77,10 +84,7 @@ const BOOTSTRAP_TTL = 7_200;  // 2h — matches FAA/NOTAM; survives ~4 missed cr
 // even on a 30min cron (worst-case fetchedAt age ≈ 55+30 = 85 < 90). Set to 0
 // to disable the gate (fetch every tick, legacy behaviour). Override via
 // AVIATIONSTACK_MIN_REFRESH_MIN.
-const INTL_MIN_REFRESH_MIN = (() => {
-  const raw = Number(process.env.AVIATIONSTACK_MIN_REFRESH_MIN ?? 55);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 55;
-})();
+const INTL_MIN_REFRESH_MIN = nonNegativeEnv('AVIATIONSTACK_MIN_REFRESH_MIN', 55);
 
 // health.js expects these exact meta keys (api/health.js:222,223,269)
 const INTL_META_KEY  = 'seed-meta:aviation:intl';
@@ -1158,8 +1162,7 @@ export async function intlIsFresh() {
 // AVIATIONSTACK_MONTHLY_BUDGET; request-time stops earlier (see
 // _avstack-budget.ts), reserving headroom for this curated feed.
 export function avstackMonthlyBudget() {
-  const raw = Number(process.env.AVIATIONSTACK_MONTHLY_BUDGET ?? 130_000);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 130_000;
+  return nonNegativeEnv('AVIATIONSTACK_MONTHLY_BUDGET', 130_000);
 }
 
 export async function reserveAviationStackBudget(count) {

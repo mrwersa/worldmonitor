@@ -32,7 +32,9 @@ function avstackBudgetKey(now = new Date()): string {
 const AVSTACK_BUDGET_TTL = 40 * 24 * 60 * 60; // 40d — outlives the month; next month uses a new key
 
 function intEnv(name: string, fallback: number): number {
-  const raw = Number(process.env[name]);
+  const value = process.env[name]?.trim();
+  if (!value) return fallback;
+  const raw = Number(value);
   return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
 }
 
