@@ -9,7 +9,7 @@ import type {
 } from '../../../../src/generated/server/worldmonitor/aviation/v1/service_server';
 import { cachedFetchJson } from '../../../_shared/redis';
 import { getRelayBaseUrl, getRelayHeaders } from './_shared';
-import { reserveAviationStackCalls } from './_avstack-budget';
+import { aviationStackBudgetMonth, reserveAviationStackCalls } from './_avstack-budget';
 
 const CACHE_TTL = 300;
 // Always fetch a full page upstream and cache it once per airport+direction,
@@ -119,7 +119,7 @@ export async function listAirportFlights(
 
     // Cache key is limit-independent (see UPSTREAM_PAGE) — one upstream call
     // serves every limit for this airport+direction.
-    const cacheKey = `aviation:flights:${airport}:${direction}:v2`;
+    const cacheKey = `aviation:flights:${airport}:${direction}:v2:${aviationStackBudgetMonth()}`;
 
     try {
         const result = await cachedFetchJson<{ flights: FlightInstance[]; source: string }>(

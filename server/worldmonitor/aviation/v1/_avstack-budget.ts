@@ -24,9 +24,13 @@ import { runRedisPipeline } from '../../../_shared/redis';
 // same Upstash instance, so they share the counter; preview deploys are
 // key-prefixed and bill separately, which is fine.
 
-function avstackBudgetKey(now = new Date()): string {
+export function aviationStackBudgetMonth(now = new Date()): string {
   const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
-  return `aviation:avstack:calls:${ym}`;
+  return ym;
+}
+
+function avstackBudgetKey(now = new Date()): string {
+  return `aviation:avstack:calls:${aviationStackBudgetMonth(now)}`;
 }
 
 const AVSTACK_BUDGET_TTL = 40 * 24 * 60 * 60; // 40d — outlives the month; next month uses a new key
@@ -69,7 +73,11 @@ export async function reserveAviationStackCalls(
     if (!Number.isFinite(total)) return true; // redis unavailable → fail-open
     if (total > ceiling) {
       // Give the reservation back so the counter reflects calls actually made.
-      await runRedisPipeline([['DECRBY', key, count]]);
+      const refund = await runRedisPipeline([['DECRBY', key, count]]);
+      const refundedTotal = Number(refund?.[0]?.result);
+      if (!Number.isFinite(refundedTotal)) {
+        console.warn(`[Aviation] AviationStack ${kind} budget refund failed for ${count} call(s); counter may be inflated`);
+      }
       console.warn(`[Aviation] AviationStack ${kind} call blocked — monthly budget reached (${total - count}/${ceiling})`);
       return false;
     }

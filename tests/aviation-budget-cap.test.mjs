@@ -122,17 +122,21 @@ describe('aviation budget: call sites are wired to the cap', () => {
   it('list-airport-flights reserves budget and quantizes the limit out of the cache key', () => {
     const src = read('server/worldmonitor/aviation/v1/list-airport-flights.ts');
     assert.match(src, /reserveAviationStackCalls\(1, 'request'\)/);
+    assert.match(src, /aviationStackBudgetMonth\(\)/);
     // Cache key must NOT vary by limit (was the spend-multiplying explosion).
     assert.doesNotMatch(src, /aviation:flights:\$\{airport\}:\$\{direction\}:\$\{limit\}/);
-    assert.match(src, /aviation:flights:\$\{airport\}:\$\{direction\}:v2/);
+    assert.match(src, /aviation:flights:\$\{airport\}:\$\{direction\}:v2:\$\{aviationStackBudgetMonth\(\)\}/);
     // Upstream always fetches a fixed page, then slices in memory.
     assert.match(src, /limit:\s*String\(UPSTREAM_PAGE\)/);
     assert.match(src, /flights\.slice\(0, limit\)/);
   });
 
-  it('get-flight-status reserves budget before the upstream call', () => {
+  it('get-flight-status reserves budget before the upstream call and caches relay errors', () => {
     const src = read('server/worldmonitor/aviation/v1/get-flight-status.ts');
     assert.match(src, /reserveAviationStackCalls\(1, 'request'\)/);
+    assert.match(src, /aviation:status:\$\{flightNumber\}:\$\{date\}:\$\{origin\}:v1:\$\{aviationStackBudgetMonth\(\)\}/);
+    assert.match(src, /Flight status relay fetch failed/);
+    assert.match(src, /return \{ flights: \[\], source: 'error' \}/);
   });
 
   it('seeder reserves its batch against the same shared counter + key', () => {
@@ -152,6 +156,21 @@ describe('aviation budget: call sites are wired to the cap', () => {
     const seeder = read('scripts/seed-aviation.mjs');
     assert.match(seeder, /getUTCFullYear\(\)/);
     assert.match(seeder, /getUTCMonth\(\)/);
+  });
+
+  it('request cache keys include the UTC budget month so budget denials expire across month rollover', () => {
+    const srv = read('server/worldmonitor/aviation/v1/_avstack-budget.ts');
+    assert.match(srv, /export function aviationStackBudgetMonth/);
+    assert.match(srv, /getUTCFullYear\(\)/);
+    assert.match(srv, /getUTCMonth\(\)/);
+    assert.match(read('server/worldmonitor/aviation/v1/list-airport-flights.ts'), /aviationStackBudgetMonth\(\)/);
+    assert.match(read('server/worldmonitor/aviation/v1/get-flight-status.ts'), /aviationStackBudgetMonth\(\)/);
+  });
+
+  it('seeder freshness gate is clamped below the health staleness window', () => {
+    const src = read('scripts/seed-aviation.mjs');
+    assert.match(src, /const MAX_INTL_MIN_REFRESH_MIN = 60/);
+    assert.match(src, /AVIATIONSTACK_MIN_REFRESH_MIN', 55, MAX_INTL_MIN_REFRESH_MIN/);
   });
 
   it('seeder fetchIntl marks its throw nonRetryable so runSeed cannot 4x the paid sweep', () => {

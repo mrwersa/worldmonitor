@@ -64,11 +64,11 @@ const NOTAM_TTL     = 7_200;  // 2h
 const NEWS_TTL      = 2_400;  // 40min
 const BOOTSTRAP_TTL = 7_200;  // 2h — matches FAA/NOTAM; survives ~4 missed cron ticks
 
-function nonNegativeEnv(name, fallback) {
+function nonNegativeEnv(name, fallback, max = Number.POSITIVE_INFINITY) {
   const value = process.env[name]?.trim();
   if (!value) return fallback;
   const raw = Number(value);
-  return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
+  return Number.isFinite(raw) && raw >= 0 ? Math.min(raw, max) : fallback;
 }
 
 // AviationStack quota guard. AviationStack is a PAID, per-airport API: one call
@@ -79,12 +79,13 @@ function nonNegativeEnv(name, fallback) {
 // SKIP the fetch entirely and just extend the last-good TTLs — turning the cron
 // cadence into an effective floor of INTL_MIN_REFRESH_MIN between paid fetches.
 //
-// Keep below runSeed's maxStaleMin (90) minus one cron interval so seed-meta
-// fetchedAt never ages into a false STALE_SEED: 55min default leaves headroom
-// even on a 30min cron (worst-case fetchedAt age ≈ 55+30 = 85 < 90). Set to 0
-// to disable the gate (fetch every tick, legacy behaviour). Override via
-// AVIATIONSTACK_MIN_REFRESH_MIN.
-const INTL_MIN_REFRESH_MIN = nonNegativeEnv('AVIATIONSTACK_MIN_REFRESH_MIN', 55);
+// Keep at or below runSeed's maxStaleMin (90) minus one 30min cron interval so
+// seed-meta fetchedAt never ages into a false STALE_SEED: 55min default leaves
+// headroom even on a 30min cron (worst-case fetchedAt age ≈ 55+30 = 85 < 90).
+// Set to 0 to disable the gate (fetch every tick, legacy behaviour). Override
+// via AVIATIONSTACK_MIN_REFRESH_MIN.
+const MAX_INTL_MIN_REFRESH_MIN = 60;
+const INTL_MIN_REFRESH_MIN = nonNegativeEnv('AVIATIONSTACK_MIN_REFRESH_MIN', 55, MAX_INTL_MIN_REFRESH_MIN);
 
 // health.js expects these exact meta keys (api/health.js:222,223,269)
 const INTL_META_KEY  = 'seed-meta:aviation:intl';
@@ -1188,13 +1189,24 @@ export async function reserveAviationStackBudget(count) {
     if (total > cap) {
       // Return the reservation so the counter reflects calls actually made.
       try {
-        await fetch(`${url}/pipeline`, {
+        const refundResp = await fetch(`${url}/pipeline`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify([['DECRBY', key, count]]),
           signal: AbortSignal.timeout(10_000),
         });
-      } catch {}
+        if (!refundResp.ok) {
+          console.warn(`[Aviation] AviationStack seed budget refund failed with HTTP ${refundResp.status}; counter may be inflated`);
+        } else {
+          const refundResults = await refundResp.json();
+          const refundedTotal = Number(refundResults?.[0]?.result);
+          if (!Number.isFinite(refundedTotal)) {
+            console.warn(`[Aviation] AviationStack seed budget refund returned no counter; counter may be inflated`);
+          }
+        }
+      } catch (err) {
+        console.warn(`[Aviation] AviationStack seed budget refund failed: ${err instanceof Error ? err.message : err}; counter may be inflated`);
+      }
       return false;
     }
     return true;
