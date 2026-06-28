@@ -290,7 +290,7 @@ export const RPC_TOOLS: ToolDef[] = [
           const parsed = JSON.parse(detail) as { error?: unknown };
           code = typeof parsed.error === 'string' ? parsed.error : '';
         } catch {
-          code = detail.slice(0, 120);
+          code = detail.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
         }
         throw new Error(`get-country-intel-brief HTTP ${res.status}${code ? `: ${code}` : ''}`);
       }
