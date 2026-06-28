@@ -377,6 +377,7 @@ export type GatewayCtx = { waitUntil: (p: Promise<unknown>) => void };
 
 const POST_TO_GET_MAX_BODY_BYTES = 1_048_576;
 const POST_TO_GET_MAX_ARRAY_VALUES_PER_KEY = 200;
+const USER_API_KEY_GATEWAY_VALIDATION_ERROR = 'User API key requires gateway validation';
 
 function isPostToGetCompatibleBodySize(headers: Headers): boolean {
   const rawContentLength = headers.get('Content-Length');
@@ -409,6 +410,42 @@ function withAuthenticatedUserId(request: Request, userId: string): Request {
   const headers = new Headers(request.headers);
   headers.set(TRUSTED_USER_ID_HEADER, userId);
   return cloneRequestWithHeaders(request, headers);
+}
+
+function normalizeAuthError(error: string | undefined): string {
+  if (!error || error === USER_API_KEY_GATEWAY_VALIDATION_ERROR) return 'Invalid API key';
+  return error;
+}
+
+function createGatewayAuthErrorResponse(
+  status: 401 | 403,
+  error: string | undefined,
+  corsHeaders: Record<string, string>,
+): Response {
+  return new Response(JSON.stringify({ error: normalizeAuthError(error) }), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      ...corsHeaders,
+    },
+  });
+}
+
+function markAuthErrorNoStore(response: Response): Response {
+  response.headers.set('Cache-Control', 'no-store');
+  response.headers.delete('CDN-Cache-Control');
+  response.headers.delete('Vercel-CDN-Cache-Control');
+  return response;
+}
+
+function hasCredentialBearingHeader(request: Request): boolean {
+  return Boolean(
+    request.headers.get('Authorization') ||
+    request.headers.get('X-WorldMonitor-Key') ||
+    request.headers.get('X-Api-Key') ||
+    request.headers.get('Cookie'),
+  );
 }
 
 async function isResilienceRankingSeedRefreshRequest(request: Request, pathname: string): Promise<boolean> {
@@ -898,10 +935,7 @@ export function createDomainGateway(
       if (ent) usage.tier = typeof ent.features.tier === 'number' ? ent.features.tier : 0;
       if (!ent || !ent.features.apiAccess) {
         emitRequest(403, 'tier_403', null);
-        return new Response(JSON.stringify({ error: 'API access subscription required' }), {
-          status: 403,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+        return createGatewayAuthErrorResponse(403, 'API access subscription required', corsHeaders);
       }
     }
 
@@ -913,10 +947,7 @@ export function createDomainGateway(
           const session = await validateBearerToken(authHeader.slice(7));
           if (!session.valid) {
             emitRequest(401, 'auth_401', null);
-            return new Response(JSON.stringify({ error: 'Invalid or expired session' }), {
-              status: 401,
-              headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            });
+            return createGatewayAuthErrorResponse(401, 'Invalid or expired session', corsHeaders);
           }
           // Capture identity for telemetry — legacy bearer auth bypasses the
           // earlier resolveClerkSession() block (only runs for tier-gated routes),
@@ -950,25 +981,16 @@ export function createDomainGateway(
           }
           if (!allowed) {
             emitRequest(403, 'tier_403', null);
-            return new Response(JSON.stringify({ error: 'Pro subscription required' }), {
-              status: 403,
-              headers: { 'Content-Type': 'application/json', ...corsHeaders },
-            });
+            return createGatewayAuthErrorResponse(403, 'Pro subscription required', corsHeaders);
           }
           // Valid pro session (Clerk role OR Dodo entitlement) — fall through to route handling.
         } else {
           emitRequest(401, 'auth_401', null);
-          return new Response(JSON.stringify({ error: keyCheck.error }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders },
-          });
+          return createGatewayAuthErrorResponse(401, keyCheck.error, corsHeaders);
         }
       } else {
         emitRequest(401, 'auth_401', null);
-        return new Response(JSON.stringify({ error: keyCheck.error }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json', ...corsHeaders },
-        });
+        return createGatewayAuthErrorResponse(401, keyCheck.error, corsHeaders);
       }
     }
 
@@ -991,7 +1013,9 @@ export function createDomainGateway(
           : entitlementResponse.status === 403 ? 'tier_403'
           : 'ok';
         emitRequest(entitlementResponse.status, entReason, null);
-        return entitlementResponse;
+        return entitlementResponse.status === 401 || entitlementResponse.status === 403
+          ? markAuthErrorNoStore(entitlementResponse)
+          : entitlementResponse;
       }
       // Allowed → record the resolved tier for telemetry. getEntitlements has
       // its own Redis cache + in-flight coalescing, so the second lookup here
@@ -1169,7 +1193,8 @@ export function createDomainGateway(
         const rpcName = pathname.split('/').pop() ?? '';
         const envOverride = process.env[`CACHE_TIER_OVERRIDE_${rpcName.replace(/-/g, '_').toUpperCase()}`] as CacheTier | undefined;
         const isPremium = PREMIUM_RPC_PATHS.has(pathname) || getRequiredTier(pathname) !== null;
-        const tier = isPremium ? 'slow-browser' as CacheTier
+        const hasCredentialedNonPublicGet = !isPublicNoAuthRpc && hasCredentialBearingHeader(request);
+        const tier = isPremium || hasCredentialedNonPublicGet ? 'slow-browser' as CacheTier
           : (envOverride && envOverride in TIER_HEADERS ? envOverride : null) ?? RPC_CACHE_TIER[pathname] ?? 'medium';
         resolvedCacheTier = tier;
         mergedHeaders.set('Cache-Control', TIER_HEADERS[tier]);
@@ -1179,7 +1204,7 @@ export function createDomainGateway(
         // 200 from a trusted-origin browser request could be served to a no-origin scraper,
         // bypassing auth entirely.
         const reqOrigin = request.headers.get('origin') || '';
-        const cdnCache = !isPremium && isAllowedOrigin(reqOrigin) ? TIER_CDN_CACHE[tier] : null;
+        const cdnCache = !isPremium && !hasCredentialedNonPublicGet && isAllowedOrigin(reqOrigin) ? TIER_CDN_CACHE[tier] : null;
         if (cdnCache) mergedHeaders.set('CDN-Cache-Control', cdnCache);
         mergedHeaders.set('X-Cache-Tier', tier);
 
