@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { afterEach, describe, it } from 'node:test';
 
 import {
+  DEFAULT_PANEL_FOOTPRINTS,
   countInteractiveControls,
   createDeferredPanelShell,
+  derivePanelReservation,
+  getDefaultPanelFootprint,
   getInitialPanelMountBudget,
   shouldDeferInitialPanelMount,
 } from '../src/app/panel-mount-deferral';
@@ -94,6 +97,113 @@ describe('panel mount deferral', () => {
     assert.equal(countInteractiveControls(shell), 0);
   });
 
+  it('keeps the static reservation map in sync with constructor-sized panels', () => {
+    assert.deepEqual(Object.keys(DEFAULT_PANEL_FOOTPRINTS).sort(), [
+      'chat-analyst',
+      'cii',
+      'consumer-prices',
+      'displacement',
+      'economic',
+      'energy-complex',
+      'energy-crisis',
+      'energy-disruptions',
+      'fuel-shortages',
+      'gdelt-intel',
+      'internet-disruptions',
+      'live-news',
+      'live-webcams',
+      'oil-inventories',
+      'pipeline-status',
+      'sanctions-pressure',
+      'security-advisories',
+      'storage-facility-map',
+      'strategic-posture',
+      'supply-chain',
+      'telegram-intel',
+      'threat-timeline',
+      'trade-policy',
+      'ucdp-events',
+      'windy-webcams',
+    ].sort());
+  });
+
+  it('derives natural, saved, and dynamic panel reservations without importing panel bundles', () => {
+    assert.deepEqual(derivePanelReservation('cii', {
+      savedRowSpans: {},
+      savedColSpans: {},
+      savedCollapsed: {},
+    }), {
+      rowSpan: 2,
+      colSpan: 1,
+      wide: false,
+      rowSpanSource: 'default',
+      colSpanSource: 'none',
+      collapsed: false,
+    });
+
+    assert.deepEqual(derivePanelReservation('strategic-risk', {
+      savedRowSpans: {},
+      savedColSpans: {},
+      savedCollapsed: {},
+    }), {
+      rowSpan: 1,
+      colSpan: 1,
+      wide: false,
+      rowSpanSource: 'none',
+      colSpanSource: 'none',
+      collapsed: false,
+    });
+
+    assert.deepEqual(getDefaultPanelFootprint('cw-alpha'), { rowSpan: 2 });
+    assert.deepEqual(getDefaultPanelFootprint('mcp-alpha'), { rowSpan: 2 });
+  });
+
+  it('applies saved span, width, and collapsed reservations to deferred shells', () => {
+    const document = installDom();
+    const shell = createDeferredPanelShell('strategic-risk', 'Strategic Risk Overview', {
+      savedRowSpans: { 'strategic-risk': 3 },
+      savedColSpans: { 'strategic-risk': 2 },
+      savedCollapsed: { 'strategic-risk': true },
+    });
+    document.body.appendChild(shell);
+
+    assert.equal(shell.classList.contains('span-3'), true);
+    assert.equal(shell.classList.contains('resized'), true);
+    assert.equal(shell.classList.contains('col-span-2'), true);
+    assert.equal(shell.classList.contains('panel-collapsed'), true);
+    assert.equal((shell.querySelector('.panel-content') as HTMLElement | null)?.style.display, 'none');
+  });
+
+  it('reserves wide and dynamic deferred shells using their real-panel footprints', () => {
+    const document = installDom();
+    const wideShell = createDeferredPanelShell('live-news', 'Live News', {
+      savedRowSpans: {},
+      savedColSpans: {},
+      savedCollapsed: {},
+    });
+    const widgetShell = createDeferredPanelShell('cw-alpha', 'Custom Widget', {
+      savedRowSpans: {},
+      savedColSpans: {},
+      savedCollapsed: {},
+    });
+    document.body.appendChild(wideShell);
+    document.body.appendChild(widgetShell);
+
+    assert.equal(wideShell.classList.contains('panel-wide'), true);
+    assert.equal(wideShell.classList.contains('span-2'), false);
+    assert.equal(widgetShell.classList.contains('span-2'), true);
+  });
+
+  it('keeps dynamic panel real constructors aligned with shell reservations', async () => {
+    const [customWidgetSource, mcpDataSource] = await Promise.all([
+      readFile(new URL('../src/components/CustomWidgetPanel.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../src/components/McpDataPanel.ts', import.meta.url), 'utf8'),
+    ]);
+
+    assert.match(customWidgetSource, /defaultRowSpan:\s*2,/, 'CustomWidgetPanel must match the cw-* shell reservation');
+    assert.match(mcpDataSource, /defaultRowSpan:\s*2,/, 'McpDataPanel must match the mcp-* shell reservation');
+  });
+
   it('materially reduces initial DOM and control count for below-budget panels', () => {
     const fullDocument = installDom();
     for (let index = 0; index < 12; index++) {
@@ -133,6 +243,35 @@ describe('panel mount deferral', () => {
       source,
       /if\s*\(!mountedFromDeferred\)\s*\{\s*panel\?\.toggle\(config\.enabled\);\s*\}/,
       'applyPanelSettings must skip its own toggle when mountDeferredPanel already toggled',
+    );
+  });
+
+  it('keeps deferred lazy shells retryable after a failed lazy import', async () => {
+    const source = await readFile(new URL('../src/app/panel-layout.ts', import.meta.url), 'utf8');
+    const mountDeferredPanel = source.match(/private\s+mountDeferredPanel[\s\S]*?\n  private mountLazyPanel/);
+    const destroyMethod = source.match(/destroy\(\):\s*void[\s\S]*?this\.deferredPanelMounts\.clear\(\);/);
+
+    assert.ok(mountDeferredPanel, 'mountDeferredPanel method not found');
+    assert.match(
+      mountDeferredPanel[0],
+      /deferred\.loading = null;[\s\S]*?if\s*\(!panel \|\| this\.ctx\.isDestroyed\)/,
+      'failed deferred lazy loads must clear the in-flight deferred.loading guard',
+    );
+    assert.match(
+      mountDeferredPanel[0],
+      /this\.lazyPanelRegistrations\.has\(key\)[\s\S]*?deferred\.placeholder\?\.parentNode[\s\S]*?this\.observeDeferredPanelShell\(key, deferred\)/,
+      'failed deferred lazy loads must keep the inert shell and re-arm observation for retry',
+    );
+    assert.match(
+      mountDeferredPanel[0],
+      /this\.deferredPanelMounts\.delete\(key\);/,
+      'deferred entries should only be deleted after the real panel successfully replaces the shell',
+    );
+    assert.ok(destroyMethod, 'destroy method cleanup not found');
+    assert.match(
+      destroyMethod[0],
+      /clearTimeout\(deferred\.retryTimer\);/,
+      'destroy must clear deferred retry timers as well as observers',
     );
   });
 

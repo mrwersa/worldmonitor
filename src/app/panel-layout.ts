@@ -130,6 +130,7 @@ interface DeferredPanelMount {
   panel: Panel | null;
   placeholder: HTMLElement | null;
   observer: IntersectionObserver | null;
+  retryTimer: ReturnType<typeof setTimeout> | null;
   mounted: boolean;
   loading: Promise<void> | null;
 }
@@ -340,6 +341,7 @@ export class PanelLayoutManager implements AppModule {
     this.panelDragCleanupHandlers = [];
     for (const deferred of this.deferredPanelMounts.values()) {
       deferred.observer?.disconnect();
+      if (deferred.retryTimer !== null) clearTimeout(deferred.retryTimer);
     }
     this.deferredPanelMounts.clear();
     this.lazyPanelRegistrations.clear();
@@ -1215,6 +1217,7 @@ export class PanelLayoutManager implements AppModule {
     }
     const existing = this.deferredPanelMounts.get(key);
     existing?.observer?.disconnect();
+    if (existing?.retryTimer !== null) clearTimeout(existing.retryTimer);
     if (existing?.placeholder && existing.placeholder !== placeholder) {
       existing.placeholder.remove();
     }
@@ -1222,6 +1225,7 @@ export class PanelLayoutManager implements AppModule {
       panel,
       placeholder,
       observer: null,
+      retryTimer: null,
       mounted: false,
       loading: null,
     };
@@ -1234,6 +1238,10 @@ export class PanelLayoutManager implements AppModule {
   private observeDeferredPanelShell(key: string, deferred: DeferredPanelMount): void {
     const { placeholder } = deferred;
     if (!placeholder) return;
+    if (deferred.retryTimer !== null) {
+      clearTimeout(deferred.retryTimer);
+      deferred.retryTimer = null;
+    }
     if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') {
       const ric = typeof window !== 'undefined'
         ? (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
@@ -1266,20 +1274,33 @@ export class PanelLayoutManager implements AppModule {
     const grid = this.getPanelMountGrid(key);
     if (!grid && !deferred.placeholder?.parentNode) return false;
 
+    if (deferred.retryTimer !== null) {
+      clearTimeout(deferred.retryTimer);
+      deferred.retryTimer = null;
+    }
     deferred.observer?.disconnect();
     deferred.observer = null;
     const targetGrid = grid ?? (deferred.placeholder!.parentNode as HTMLElement);
     const finish = (panel: Panel | null): void => {
-      if (!panel || this.ctx.isDestroyed) return;
       const current = this.deferredPanelMounts.get(key);
       if (current !== deferred || deferred.mounted) return;
+      deferred.loading = null;
+      if (!panel || this.ctx.isDestroyed) {
+        if (!this.ctx.isDestroyed && this.lazyPanelRegistrations.has(key) && deferred.placeholder?.parentNode) {
+          deferred.retryTimer = setTimeout(() => {
+            if (this.deferredPanelMounts.get(key) !== deferred || deferred.mounted) return;
+            deferred.retryTimer = null;
+            this.observeDeferredPanelShell(key, deferred);
+          }, 1000);
+        }
+        return;
+      }
       const placeholder = deferred.placeholder;
       if (this.mountPanelElement(targetGrid, key, panel, placeholder)) {
         this.afterPanelMounted(key, panel);
       }
       deferred.mounted = true;
       deferred.placeholder = null;
-      deferred.loading = null;
       this.deferredPanelMounts.delete(key);
     };
 
