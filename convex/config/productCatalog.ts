@@ -14,11 +14,41 @@
  *   6. Re-seed plans: npx convex run payments/seedProductPlans:seedProductPlans
  */
 
+export type PlanLimits = {
+  /**
+   * Daily REST/gateway request allowance. `null` means unlimited for plans
+   * where customer-specific contracts set the real cap outside the catalog.
+   */
+  apiRequestsPerDay: number | null;
+  /**
+   * Per-minute REST/gateway burst allowance. Mirrors `apiRateLimit` for
+   * current callers while giving plan-limit lifecycle code a named dimension.
+   */
+  apiBurstRequestsPerMinute: number | null;
+  /**
+   * Daily MCP tool/resource call allowance. Current runtime enforcement only
+   * has a Pro daily counter; API-tier counters need scanner/source support.
+   */
+  mcpCallsPerDay: number | null;
+  /**
+   * Per-minute MCP burst allowance. Notices stay disabled until limiter-hit
+   * telemetry is durable enough to scan.
+   */
+  mcpBurstRequestsPerMinute: number | null;
+};
+
+export type PlanLimitDimension =
+  | "api_daily_requests"
+  | "api_minute_burst"
+  | "mcp_daily_calls"
+  | "mcp_minute_burst";
+
 export type PlanFeatures = {
   tier: number;
   maxDashboards: number;
   apiAccess: boolean;
   apiRateLimit: number;
+  planLimits?: PlanLimits;
   prioritySupport: boolean;
   exportFormats: string[];
   /**
@@ -60,6 +90,12 @@ const FREE_FEATURES: PlanFeatures = {
   maxDashboards: 3,
   apiAccess: false,
   apiRateLimit: 0,
+  planLimits: {
+    apiRequestsPerDay: 0,
+    apiBurstRequestsPerMinute: 0,
+    mcpCallsPerDay: 0,
+    mcpBurstRequestsPerMinute: 0,
+  },
   prioritySupport: false,
   exportFormats: ["csv"],
   mcpAccess: false,
@@ -70,6 +106,12 @@ const PRO_FEATURES: PlanFeatures = {
   maxDashboards: 10,
   apiAccess: false,
   apiRateLimit: 0,
+  planLimits: {
+    apiRequestsPerDay: 0,
+    apiBurstRequestsPerMinute: 0,
+    mcpCallsPerDay: 50,
+    mcpBurstRequestsPerMinute: 60,
+  },
   prioritySupport: false,
   exportFormats: ["csv", "pdf"],
   mcpAccess: true,
@@ -80,6 +122,12 @@ const API_STARTER_FEATURES: PlanFeatures = {
   maxDashboards: 25,
   apiAccess: true,
   apiRateLimit: 60,
+  planLimits: {
+    apiRequestsPerDay: 1_000,
+    apiBurstRequestsPerMinute: 60,
+    mcpCallsPerDay: 1_000,
+    mcpBurstRequestsPerMinute: 60,
+  },
   prioritySupport: false,
   exportFormats: ["csv", "pdf", "json"],
   mcpAccess: true,
@@ -90,6 +138,12 @@ const API_BUSINESS_FEATURES: PlanFeatures = {
   maxDashboards: 100,
   apiAccess: true,
   apiRateLimit: 300,
+  planLimits: {
+    apiRequestsPerDay: 10_000,
+    apiBurstRequestsPerMinute: 300,
+    mcpCallsPerDay: 10_000,
+    mcpBurstRequestsPerMinute: 300,
+  },
   prioritySupport: true,
   exportFormats: ["csv", "pdf", "json", "xlsx"],
   mcpAccess: true,
@@ -100,6 +154,12 @@ const ENTERPRISE_FEATURES: PlanFeatures = {
   maxDashboards: -1,
   apiAccess: true,
   apiRateLimit: 1000,
+  planLimits: {
+    apiRequestsPerDay: null,
+    apiBurstRequestsPerMinute: 1000,
+    mcpCallsPerDay: null,
+    mcpBurstRequestsPerMinute: 1000,
+  },
   prioritySupport: true,
   exportFormats: ["csv", "pdf", "json", "xlsx", "api-stream"],
   mcpAccess: true,
@@ -298,6 +358,24 @@ export function getEntitlementFeatures(planKey: string): PlanFeatures {
     );
   }
   return entry.features;
+}
+
+export function getPlanLimit(
+  planKey: string,
+  dimension: PlanLimitDimension,
+): number | null {
+  const limits = getEntitlementFeatures(planKey).planLimits;
+  if (!limits) return null;
+  switch (dimension) {
+    case "api_daily_requests":
+      return limits.apiRequestsPerDay;
+    case "api_minute_burst":
+      return limits.apiBurstRequestsPerMinute;
+    case "mcp_daily_calls":
+      return limits.mcpCallsPerDay;
+    case "mcp_minute_burst":
+      return limits.mcpBurstRequestsPerMinute;
+  }
 }
 
 export function resolveProductToPlan(dodoProductId: string): string | null {
