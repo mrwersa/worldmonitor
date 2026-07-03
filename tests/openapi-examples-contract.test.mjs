@@ -226,6 +226,24 @@ function assertOperationExamples(spec, label) {
   return { operations, requestExpected, responseExpected };
 }
 
+function assertRecordBaselineSampleTypes(spec, label, validTypes) {
+  let checked = 0;
+  for (const { path, method, op } of operationEntries(spec)) {
+    if (!path.includes('record-baseline-snapshot')) continue;
+    const opLabel = label + ': ' + method.toUpperCase() + ' ' + path;
+    const example = op.requestBody?.content?.[JSON_MEDIA]?.example;
+    for (const update of example?.updates ?? []) {
+      checked++;
+      assert.ok(
+        validTypes.has(update.type),
+        opLabel + " sample type '" + update.type + "' is not an accepted VALID_BASELINE_TYPES member; " +
+          'the handler would silently skip it',
+      );
+    }
+  }
+  assert.ok(checked > 0, label + ': expected at least one record-baseline-snapshot update example to check');
+}
+
 describe('OpenAPI examples contract', () => {
   // Bump these exact surface counts when adding or removing proto services/RPCs.
   it('audits the known service operation surface', () => {
@@ -249,6 +267,35 @@ describe('OpenAPI examples contract', () => {
     assert.equal(totals.operations, 192);
     assert.ok(totals.requestExpected >= 137, `expected at least 137 request example targets, found ${totals.requestExpected}`);
     assert.equal(totals.responseExpected, 192);
+  });
+
+  // record-baseline-snapshot's nested updates[].type is a bare string (no schema
+  // enum), so the field-name heuristic used to emit 'all', which the handler
+  // rejects (VALID_BASELINE_TYPES has no 'all'), silently skipping the update and
+  // contradicting the 200 example. Guard the curated override against a regen
+  // reverting it across the per-service JSON/YAML specs and unified bundle.
+  it('uses a real accepted baseline type in the record-baseline-snapshot sample', () => {
+    const contract = JSON.parse(
+      readFileSync(resolve(root, 'shared/openapi-filter-param-contracts.json'), 'utf8'),
+    );
+    const validTypes = new Set(contract.infrastructureTemporalBaselineTypes ?? []);
+    assert.ok(validTypes.size > 0, 'expected infrastructureTemporalBaselineTypes in the filter-param contract');
+
+    const specs = [
+      [
+        'InfrastructureService.openapi.json',
+        JSON.parse(readFileSync(resolve(apiDir, 'InfrastructureService.openapi.json'), 'utf8')),
+      ],
+      [
+        'InfrastructureService.openapi.yaml',
+        loadYaml(readFileSync(resolve(apiDir, 'InfrastructureService.openapi.yaml'), 'utf8')),
+      ],
+      ['worldmonitor.openapi.yaml', loadYaml(readFileSync(resolve(apiDir, 'worldmonitor.openapi.yaml'), 'utf8'))],
+    ];
+
+    for (const [label, spec] of specs) {
+      assertRecordBaselineSampleTypes(spec, label, validTypes);
+    }
   });
 
   it('adds request and response examples to every per-service YAML spec', () => {
