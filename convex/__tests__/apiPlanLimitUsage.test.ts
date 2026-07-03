@@ -162,6 +162,77 @@ describe("api plan-limit usage scanner", () => {
     expect(notices.filter((notice) => notice.current)).toHaveLength(0);
   });
 
+  test("a continuing burst reuses one notice across hourly scans and holds the 6h email cadence", async () => {
+    const t = convexTest(schema, modules);
+    await seedEntitlement(t, "user-pro", "pro_monthly");
+    const noticeFns = (internal as any).apiPlanLimitNotices;
+
+    const burstRow = {
+      userId: "user-pro",
+      dimension: "mcp_minute_burst",
+      usage: 90,
+      minuteBuckets: [61, 62, 63, 65, 66],
+      source: "axiom:mcp_rate_limit_hit",
+    };
+
+    // Scan 1: burst tripped -> one pending sustained_burst notice.
+    await t.action(usageFns.scanApiPlanLimitUsageInternal, { now: NOW, rows: [burstRow] });
+    let notices = await t.run((ctx) => ctx.db.query("apiPlanLimitNotices").collect());
+    expect(notices).toHaveLength(1);
+    const noticeId = notices[0]._id;
+
+    // Simulate the email-delivery cron sending it.
+    await t.mutation(noticeFns.markEmailStatus, { noticeId, emailStatus: "sent", emailedAt: NOW });
+
+    // Scan 2, one hour later, burst still active. The scanner runs HOURLY, so a
+    // minute-grained notice window would mint a fresh pending notice every scan
+    // (bypassing the 6h cadence + losing dismiss/attempt state). The notice must
+    // instead REUSE the same document so lastEmailedAt/emailStatus carry forward.
+    await t.action(usageFns.scanApiPlanLimitUsageInternal, { now: NOW + 3_600_000, rows: [burstRow] });
+
+    notices = await t.run((ctx) => ctx.db.query("apiPlanLimitNotices").collect());
+    expect(notices).toHaveLength(1); // reused, not re-minted
+    expect(String(notices[0]._id)).toBe(String(noticeId));
+    expect(notices[0].current).toBe(true);
+    expect(notices[0].emailStatus).toBe("sent"); // not flipped back to pending
+    expect(notices[0].lastEmailedAt).toBe(NOW); // preserved
+
+    // Cadence: not due again within BURST_EMAIL_CADENCE_MS (6h).
+    const due = await t.query(noticeFns.listEmailDue, { now: NOW + 3_600_000 });
+    expect(due.map((n: { _id: unknown }) => String(n._id))).not.toContain(String(noticeId));
+
+    // Audit granularity preserved: rollups keep the minute-grained windowKey
+    // while the notice carries only the coarse (day) dedupe key.
+    const rollups = await t.run((ctx) => ctx.db.query("apiUsageRollups").collect());
+    expect(rollups.some((r) => r.windowKey.includes("T"))).toBe(true);
+    expect(notices[0].windowKey).not.toContain("T");
+  });
+
+  test("a dismissed burst notice stays dismissed across an hourly rescan", async () => {
+    const t = convexTest(schema, modules);
+    await seedEntitlement(t, "user-pro", "pro_monthly");
+
+    const burstRow = {
+      userId: "user-pro",
+      dimension: "mcp_minute_burst",
+      usage: 90,
+      minuteBuckets: [61, 62, 63, 65, 66],
+      source: "axiom:mcp_rate_limit_hit",
+    };
+
+    await t.action(usageFns.scanApiPlanLimitUsageInternal, { now: NOW, rows: [burstRow] });
+    const before = await t.run((ctx) => ctx.db.query("apiPlanLimitNotices").collect());
+    expect(before).toHaveLength(1);
+    // Simulate the user dismissing it (acknowledgeNotice sets acknowledgedAt).
+    await t.run((ctx) => ctx.db.patch(before[0]._id, { acknowledgedAt: NOW }));
+
+    // Burst continues; the hourly rescan must NOT resurrect the dismissed notice.
+    await t.action(usageFns.scanApiPlanLimitUsageInternal, { now: NOW + 3_600_000, rows: [burstRow] });
+    const after = await t.run((ctx) => ctx.db.query("apiPlanLimitNotices").collect());
+    expect(after).toHaveLength(1);
+    expect(after[0].acknowledgedAt).toBe(NOW); // dismiss survived
+  });
+
   test("skips rows that cannot be joined to an active entitlement", async () => {
     const t = convexTest(schema, modules);
 

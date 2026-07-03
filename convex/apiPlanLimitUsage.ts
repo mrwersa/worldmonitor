@@ -81,9 +81,16 @@ function windowForDimension(dimension: PlanLimitDimension, now: number) {
   if (dimension === "api_minute_burst" || dimension === "mcp_minute_burst") {
     const end = Math.floor(now / 60_000) * 60_000;
     return {
+      // Rollup window keeps minute granularity for audit.
       windowKey: utcMinuteKey(end),
       windowStart: end - (5 * 60_000),
       windowEnd: end,
+      // Notice identity is COARSE (UTC day) so a burst that continues across the
+      // hourly scan boundary dedupes to one notice instead of minting a fresh
+      // pending row every scan (which would bypass the 6h email cadence and drop
+      // dismiss / attempt state). A sustained_burst is an ongoing condition, not
+      // a single minute — a per-day notice identity matches the daily dims.
+      noticeWindowKey: utcDayKey(now),
     };
   }
   const day = new Date(utcDayKey(now));
@@ -92,6 +99,7 @@ function windowForDimension(dimension: PlanLimitDimension, now: number) {
     windowKey: utcDayKey(now),
     windowStart: start,
     windowEnd: start + DAY_MS,
+    noticeWindowKey: utcDayKey(now),
   };
 }
 
@@ -383,6 +391,7 @@ async function scanHandler(ctx: any, args: {
           planKey,
           dimension: row.dimension,
           windowKey: window.windowKey,
+          noticeWindowKey: window.noticeWindowKey,
           windowStart: window.windowStart,
           windowEnd: window.windowEnd,
           limit,

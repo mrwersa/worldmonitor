@@ -162,6 +162,10 @@ const rollupValidator = v.object({
   planKey: v.string(),
   dimension: dimensionValidator,
   windowKey: v.string(),
+  // Coarse, scan-frequency-independent key for NOTICE dedupe (the rollup keeps
+  // the fine `windowKey`). Optional so direct-mutation callers/tests that don't
+  // set it fall back to `windowKey` (correct for daily dims, where they match).
+  noticeWindowKey: v.optional(v.string()),
   windowStart: v.number(),
   windowEnd: v.number(),
   limit: v.union(v.number(), v.null()),
@@ -222,6 +226,7 @@ export const recordUsageEvaluation = internalMutation({
     }
 
     const now = args.rollup.computedAt;
+    const noticeWindowKey = args.rollup.noticeWindowKey ?? args.rollup.windowKey;
     const existingNotice = await ctx.db
       .query("apiPlanLimitNotices")
       .withIndex("by_notice_dedupe", (q) =>
@@ -230,7 +235,7 @@ export const recordUsageEvaluation = internalMutation({
           .eq("planKey", args.rollup.planKey)
           .eq("dimension", args.rollup.dimension)
           .eq("state", args.notice!.state)
-          .eq("windowKey", args.rollup.windowKey),
+          .eq("windowKey", noticeWindowKey),
       )
       .first();
 
@@ -293,7 +298,7 @@ export const recordUsageEvaluation = internalMutation({
       planKey: args.rollup.planKey,
       dimension: args.rollup.dimension,
       state: args.notice.state,
-      windowKey: args.rollup.windowKey,
+      windowKey: noticeWindowKey,
       firstSeenAt: now,
       ...noticePatch,
     });
