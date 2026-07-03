@@ -457,6 +457,19 @@ function makeFakeElement(): FakeElement {
   return el;
 }
 
+function chipMarkup(html: string, code: string): string {
+  const match = html.match(new RegExp('<button[^>]*data-code="' + code + '"[^>]*>[\\s\\S]*?<\\/button>'));
+  assert.ok(match, `expected ${code} chip markup`);
+  return match[0];
+}
+
+function cssRuleBody(css: string, selector: string): string {
+  const selectorPattern = selector.replace(/\./g, '\\.');
+  const match = css.match(new RegExp(selectorPattern + '\\s*\\{([\\s\\S]*?)\\}'));
+  assert.ok(match, `expected ${selector} CSS rule`);
+  return match[1];
+}
+
 describe('mountCountryChipPicker', () => {
   it('renders chips for the initial selection', () => {
     const root = makeFakeElement() as unknown as HTMLElement;
@@ -612,19 +625,79 @@ describe('country picker — removal affordance (regression)', () => {
   it('selected chips render a ✕ remove glyph; unselected chips do not', () => {
     const selected = makeFakeElement() as unknown as HTMLElement;
     mountCountryChipPicker(selected, { initial: ['US'] });
+    const selectedUs = chipMarkup(selected.innerHTML, 'US');
     assert.match(
-      selected.innerHTML,
-      /data-code="US"[\s\S]*?us-notif-country-chip-x/,
+      selectedUs,
+      /us-notif-country-chip-on/,
+      'a selected chip must render the selected-state class',
+    );
+    assert.match(
+      selectedUs,
+      /us-notif-country-chip-x/,
       'a selected chip must render the ✕ remove affordance',
+    );
+    assert.match(
+      selectedUs,
+      /title="Remove United States"/,
+      'a selected common chip must expose remove tooltip copy',
     );
 
     const empty = makeFakeElement() as unknown as HTMLElement;
     mountCountryChipPicker(empty, { initial: [] });
+    const unselectedUs = chipMarkup(empty.innerHTML, 'US');
     assert.doesNotMatch(
-      empty.innerHTML,
+      unselectedUs,
+      /us-notif-country-chip-on/,
+      'an unselected chip must not render the selected-state class',
+    );
+    assert.doesNotMatch(
+      unselectedUs,
       /us-notif-country-chip-x/,
       'no ✕ affordance should render when nothing is selected',
     );
+    assert.match(
+      unselectedUs,
+      /title="Add United States"/,
+      'an unselected common chip must expose add tooltip copy',
+    );
+  });
+
+  it('clicking a selected chip visibly returns it to the unselected state', () => {
+    const root = makeFakeElement() as unknown as HTMLElement;
+    const picker = mountCountryChipPicker(root, { initial: ['US'] });
+    const fakeChip = {
+      dataset: { code: 'US' },
+      closest(sel: string) {
+        return sel === '.us-notif-country-chip' ? this : null;
+      },
+      matches(_sel: string) { return false; },
+    };
+
+    root.dispatchEvent({ type: 'click', target: fakeChip });
+
+    const usChip = chipMarkup(root.innerHTML, 'US');
+    assert.deepEqual(picker.getValue(), []);
+    assert.match(
+      usChip,
+      /aria-pressed="false"/,
+      'removing a selected chip must update its pressed state',
+    );
+    assert.doesNotMatch(
+      usChip,
+      /us-notif-country-chip-on/,
+      'removing a selected chip must clear the selected-state class',
+    );
+    assert.doesNotMatch(
+      usChip,
+      /us-notif-country-chip-x/,
+      'removing a selected chip must clear the ✕ affordance',
+    );
+    assert.match(
+      usChip,
+      /title="Add United States"/,
+      'removing a selected chip must restore add tooltip copy',
+    );
+    picker.destroy();
   });
 
   it('custom (non-common) selected codes also render the ✕ remove glyph', () => {
@@ -643,15 +716,23 @@ describe('country picker — removal affordance (regression)', () => {
       resolve(__dirname, '..', 'src', 'styles', 'main.css'),
       'utf-8',
     );
+    const baseRule = cssRuleBody(css, '.us-notif-country-chip');
+    const selectedRule = cssRuleBody(css, '.us-notif-country-chip-on');
+    assert.match(baseRule, /background:\s*transparent;/, 'base chip must render as unselected');
     assert.match(
-      css,
-      /\.us-notif-country-chip\s*\{/,
-      'main.css must define a base .us-notif-country-chip rule',
+      selectedRule,
+      /background:\s*rgba\(52,\s*211,\s*153,\s*0\.12\);/,
+      'selected chip must have a visible selected background',
     );
     assert.match(
-      css,
-      /\.us-notif-country-chip-on\s*\{/,
-      'main.css must define a distinct .us-notif-country-chip-on selected state',
+      selectedRule,
+      /border-color:\s*rgba\(52,\s*211,\s*153,\s*0\.4\);/,
+      'selected chip must have a visible selected border',
+    );
+    assert.match(
+      selectedRule,
+      /color:\s*var\(--settings-green\);/,
+      'selected chip must have a visible selected text color',
     );
     assert.match(
       css,
