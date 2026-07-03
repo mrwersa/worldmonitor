@@ -109,7 +109,11 @@ function dodoUpgradeNotice(planKey: string, dimension: PlanLimitDimension): Omit
   }
   if (planKey === "api_starter" || planKey === "api_starter_annual") {
     const business = PRODUCT_CATALOG.api_business;
-    if (business?.selfServe && business.currentForCheckout) {
+    // Gate billing_portal on a real self-serve plan-CHANGE surface, not on
+    // currentForCheckout ("purchasable at all"). The Dodo customer portal cannot
+    // change an existing customer's plan, so pointing "Upgrade to Business" there
+    // would dead-end; fall through to contact_support until that surface exists.
+    if (business?.canChangePlanSelfServe) {
       return { upgradeTargetPlanKey: "api_business", ctaKind: "billing_portal" };
     }
     return {

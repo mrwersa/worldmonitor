@@ -91,6 +91,13 @@ export interface CatalogEntry {
   selfServe: boolean;
   highlighted: boolean;
   currentForCheckout: boolean;
+  // Whether EXISTING customers can self-serve CHANGE their plan to this one.
+  // Distinct from `currentForCheckout` (which only means "purchasable at all"):
+  // the Dodo customer portal cannot perform a plan change, so the plan-limit
+  // upgrade CTA's `billing_portal` path is gated on THIS flag. Keep false until
+  // a real self-serve change-plan surface exists; otherwise the CTA leads to a
+  // portal that can't upgrade anyone.
+  canChangePlanSelfServe?: boolean;
   publicVisible: boolean;
 }
 
@@ -300,6 +307,9 @@ export const PRODUCT_CATALOG: Record<string, CatalogEntry> = {
     selfServe: false,
     highlighted: false,
     currentForCheckout: false,
+    // No self-serve plan-CHANGE surface yet (change-plan is a distinct Dodo API,
+    // not the customer portal), so the upgrade CTA falls through to contact_support.
+    canChangePlanSelfServe: false,
     publicVisible: false,
   },
 
