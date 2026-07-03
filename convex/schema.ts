@@ -643,7 +643,6 @@ export default defineSchema({
     ctaKind: apiPlanLimitCtaKind,
     blockedReason: v.optional(v.string()),
   })
-    .index("by_user_state", ["userId", "state"])
     .index("by_notice_dedupe", ["userId", "planKey", "dimension", "state", "windowKey"])
     // `current` first so listEmailDue can exclude superseded rows in the index
     // (not a post-take filter) -- a dead-pending backlog can't starve live due notices.
