@@ -105,7 +105,7 @@ API and MCP plan caps are tracked against the product catalog limits that ship w
 | API Business | 10,000 | 300 | 10,000 | 300 |
 | Enterprise | Unlimited | 1,000 | Unlimited | 1,000 |
 
-When a paid user approaches or exceeds one of these limits, WorldMonitor records a compact Convex rollup and opens a current account notice in Settings. Daily limits warn at 80% and switch to over-limit at 100%; burst limits only notify on sustained pressure, not a single isolated spike.
+When a paid user approaches or exceeds one of these limits, WorldMonitor records a compact Convex rollup and opens a current account notice in Settings. The daily count is read from the same per-account meter that governs enforcement, so a warning reflects the same usage number the plan is metered against. Daily limits warn at 80% and switch to over-limit at 100%; burst limits only notify on sustained pressure, not a single isolated spike.
 
 If the notice is still current, a Resend-backed lifecycle sends an email at a bounded cadence. The email and dashboard notice explain the current usage, the relevant plan limit, and the available options: reduce traffic, wait for reset, upgrade when a self-serve path exists, or contact support when the next tier is not self-serve.
 

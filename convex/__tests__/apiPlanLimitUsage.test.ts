@@ -45,6 +45,41 @@ describe("api plan-limit usage scanner", () => {
     expect(summary.notified).toBe(0);
   });
 
+  test("api daily detection reads the Redis rl:apikey:day meter, keyed by userId", async () => {
+    const t = convexTest(schema, modules);
+    await seedEntitlement(t, "user-api", "api_starter");
+    vi.stubEnv("AXIOM_QUERY_TOKEN", "test-token");
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://upstash.test");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "upstash-token");
+
+    // Route the production path's outbound calls: Axiom returns nothing (so the
+    // OLD count() source would yield no daily notice), while the enforcement
+    // meter GET returns 1200 (> the 1000/day Starter cap). A daily over_limit
+    // notice can therefore only come from reading the meter.
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+      const u = String(url);
+      if (u.includes("api.axiom.co")) {
+        return new Response(JSON.stringify({ matches: [] }), { status: 200 });
+      }
+      if (u.includes("rl%3Aapikey%3Aday")) {
+        return new Response(JSON.stringify({ result: "1200" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ result: "0" }), { status: 200 });
+    }));
+
+    await t.action(usageFns.scanApiPlanLimitUsageInternal, { now: NOW });
+
+    const notices = await t.run((ctx) => ctx.db.query("apiPlanLimitNotices").collect());
+    const daily = notices.filter((n) => n.dimension === "api_daily_requests");
+    expect(daily).toHaveLength(1);
+    expect(daily[0]).toMatchObject({ state: "over_limit", usage: 1200 });
+
+    const rollups = await t.run((ctx) => ctx.db.query("apiUsageRollups").collect());
+    const dailyRollup = rollups.find((r) => r.dimension === "api_daily_requests");
+    expect(dailyRollup?.usage).toBe(1200);
+    expect(dailyRollup?.source).toContain("apikey_day");
+  });
+
   test("dry run reports would-notify without mutating notice state", async () => {
     const t = convexTest(schema, modules);
     await seedEntitlement(t, "user-api", "api_starter");

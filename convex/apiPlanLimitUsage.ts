@@ -207,6 +207,20 @@ function dailyCounterKey(userId: string, date: Date): string {
   return `mcp:pro-usage:${userId}:${yyyy}-${mm}-${dd}`;
 }
 
+// The SAME per-account daily meter #3199 enforcement authoritatively increments
+// (server/_shared/api-key-rate-limit.ts `apiKeyDailyKey`) so a warning matches
+// what is (or will be) enforced, instead of a lossy Axiom count() on a different
+// identity. Keyed by the Clerk userId (== the gateway's `sessionUserId` identity
+// for user API keys == entitlements.userId), which also removes the Axiom
+// customer_id join for the daily axis. Un-prefixed: `getKeyPrefix()` is empty in
+// production (VERCEL_ENV), matching the existing un-prefixed mcp pro-daily read.
+function apiDailyMeterKey(userId: string, date: Date): string {
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `rl:apikey:day:${userId}:${yyyy}-${mm}-${dd}`;
+}
+
 async function readRedisInteger(key: string): Promise<number | null> {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -254,14 +268,10 @@ async function buildProductionRows(
   const rows: ScannerUsageRow[] = [];
   const day = utcDayKey(now);
 
-  const dailyApl = `['wm_api_usage']
-| where event_type == "request" and _time >= datetime(${day}T00:00:00Z)
-| where isnotnull(customer_id) and customer_id != ""
-| summarize usage = count() by customer_id`;
-  const daily = await queryAxiom(dailyApl, "api_daily_requests");
-  rows.push(...daily.rows);
-  if (daily.blockedReason) blocked.push({ dimension: "api_daily_requests", reason: daily.blockedReason });
-
+  // api_daily_requests is now sourced from the enforcement Redis meter, keyed by
+  // userId, in the Upstash-gated block below (not an Axiom count() by customer_id).
+  // The per-minute burst axis stays Axiom-derived: the rl:apikey:min meter is a
+  // single counter with no 5-bucket history to express sustained_burst.
   const burstApl = `['wm_api_usage']
 | where event_type == "request" and _time > ago(10m)
 | where isnotnull(customer_id) and customer_id != ""
@@ -327,26 +337,49 @@ async function buildProductionRows(
   }
 
   if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    blocked.push({ dimension: "api_daily_requests", reason: "missing_upstash_credentials_for_daily_meter" });
     blocked.push({ dimension: "mcp_daily_calls", reason: "missing_upstash_credentials_for_pro_daily_fallback" });
     return { rows, blocked };
   }
 
+  const meterDate = new Date(now);
   for (const ent of active) {
-    const isPro = ent.planKey === "pro_monthly" || ent.planKey === "pro_annual";
-    if (!isPro || !ent.mcpAccess) continue;
-    const usage = await readRedisInteger(dailyCounterKey(ent.userId, new Date(now)));
-    if (usage == null) {
-      blocked.push({ userId: ent.userId, dimension: "mcp_daily_calls", reason: "redis_read_failed" });
-      continue;
+    // api_daily_requests: read the SAME per-account daily meter #3199 enforces
+    // on, keyed by userId. Skip unlimited plans (null limit == enterprise; the
+    // gateway never meters them, so the key is absent anyway).
+    if (ent.apiAccess && getPlanLimit(ent.planKey, "api_daily_requests") != null) {
+      const usage = await readRedisInteger(apiDailyMeterKey(ent.userId, meterDate));
+      if (usage == null) {
+        blocked.push({ userId: ent.userId, dimension: "api_daily_requests", reason: "redis_read_failed" });
+      } else {
+        rows.push({
+          userId: ent.userId,
+          planKey: ent.planKey,
+          dimension: "api_daily_requests",
+          usage,
+          source: "redis:apikey_day",
+          sourceFreshAt: now,
+        });
+      }
     }
-    rows.push({
-      userId: ent.userId,
-      planKey: ent.planKey,
-      dimension: "mcp_daily_calls",
-      usage,
-      source: "redis:mcp_pro_daily",
-      sourceFreshAt: now,
-    });
+
+    // mcp_daily_calls: existing Pro daily-counter fallback (unchanged).
+    const isPro = ent.planKey === "pro_monthly" || ent.planKey === "pro_annual";
+    if (isPro && ent.mcpAccess) {
+      const usage = await readRedisInteger(dailyCounterKey(ent.userId, meterDate));
+      if (usage == null) {
+        blocked.push({ userId: ent.userId, dimension: "mcp_daily_calls", reason: "redis_read_failed" });
+      } else {
+        rows.push({
+          userId: ent.userId,
+          planKey: ent.planKey,
+          dimension: "mcp_daily_calls",
+          usage,
+          source: "redis:mcp_pro_daily",
+          sourceFreshAt: now,
+        });
+      }
+    }
   }
 
   return { rows, blocked };
