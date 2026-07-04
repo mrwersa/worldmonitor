@@ -67,7 +67,7 @@ describe('cloud prefs panel sync guardrails', () => {
     );
     assert.match(
       appSrc,
-      /monitorPanel\?\.setMonitors\?\.\(this\.state\.monitors\)/,
+      /monitorPanel\?\.setMonitors\(this\.state\.monitors\)/,
       'App must update an already-mounted My Monitors panel when cloud prefs change monitors',
     );
     assert.match(
@@ -129,6 +129,21 @@ describe('cloud prefs panel sync guardrails', () => {
       cloudSyncSrc,
       /_dirtyKeys\.clear\(\);\s*persistDirtyKeys\(\);\s*_dirtyKeysUserId = null;/,
       'sign-out must clear the persisted dirty-key marker before dropping the current user id',
+    );
+  });
+
+  it('does not clear/persist settled dirty keys after a mid-upload account switch', () => {
+    const cloudSyncSrc = readSrc('src/utils/cloud-prefs-sync.ts');
+
+    assert.match(
+      cloudSyncSrc,
+      /if \(_authGeneration !== myGeneration\) return;[\s\S]*clearSettledDirtyKeys\(postedBlob\)/,
+      'uploadNow success branch must bail before clearing settled dirty keys when the auth generation advanced (sign-out / account switch mid-upload)',
+    );
+    assert.match(
+      cloudSyncSrc,
+      /if \(_authGeneration !== callerGeneration\) return false;[\s\S]*clearSettledDirtyKeys\(merged\)/,
+      'resolveConflictWithMerge must bail before clearing settled dirty keys when the caller auth generation advanced',
     );
   });
 });

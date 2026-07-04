@@ -408,7 +408,7 @@ async function postCloudPrefs(
  * the post body — silently discarding the edit the user had just made (e.g. a
  * watchlist typed seconds earlier, then lost on the debounced upload's 409).
  */
-async function resolveConflictWithMerge(token: string, variant: string): Promise<boolean> {
+async function resolveConflictWithMerge(token: string, variant: string, callerGeneration: number): Promise<boolean> {
   const fresh = await fetchCloudPrefs(token, variant);
   if (!fresh) {
     setState('error');
@@ -424,6 +424,11 @@ async function resolveConflictWithMerge(token: string, variant: string): Promise
     setState('conflict');
     return false;
   }
+  // Generation guard (same vector as uploadNow's success branch): if the
+  // signed-in user switched during the awaits above, do not clear/persist
+  // settled dirty keys — _dirtyKeys now belongs to another user and the
+  // write would durably corrupt their persisted dirty-key entry.
+  if (_authGeneration !== callerGeneration) return false;
   setSyncVersion(retry.syncVersion);
   clearSettledDirtyKeys(merged);
   Storage.prototype.setItem.call(localStorage, KEY_LAST_SYNC_AT, String(Date.now()));
@@ -497,7 +502,7 @@ export async function onSignIn(userId: string, variant: string): Promise<void> {
         // Merge instead of clobber — see resolveConflictWithMerge. The old
         // path here applied the cloud blob over localStorage and stopped,
         // discarding the local edits this branch was trying to upload.
-        await resolveConflictWithMerge(token, variant);
+        await resolveConflictWithMerge(token, variant, myGeneration);
       } else {
         setSyncVersion(result.syncVersion);
         clearSettledDirtyKeys(blob);
@@ -601,8 +606,15 @@ async function uploadNow(variant: string): Promise<void> {
       // of overwriting localStorage with cloud (the old path did
       // applyCloudBlob(cloud) then re-posted buildCloudBlob() — which by then
       // WAS the cloud blob, so the user's just-made edit was silently lost).
-      await resolveConflictWithMerge(token, variant);
+      await resolveConflictWithMerge(token, variant, myGeneration);
     } else {
+      // Generation guard: a sign-out / account-switch during the awaits above
+      // repoints _dirtyKeys and _dirtyKeysUserId to a different user. Clearing
+      // (and now persisting) settled keys here would durably corrupt that
+      // user's dirty-key entry using this upload's stale postedBlob. Match the
+      // 503 retry branch and the flush-success path — bail if the generation
+      // moved.
+      if (_authGeneration !== myGeneration) return;
       setSyncVersion(result.syncVersion);
       clearSettledDirtyKeys(postedBlob);
       Storage.prototype.setItem.call(localStorage, KEY_LAST_SYNC_AT, String(Date.now()));
