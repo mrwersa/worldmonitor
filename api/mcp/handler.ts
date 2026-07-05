@@ -5,7 +5,7 @@ import {
   applyPerMinuteLimit,
   PRODUCTION_DEPS,
   resolveAuthContext,
-  runProPreChecks,
+  runContextPreChecks,
   wwwAuthHeader,
 } from './auth';
 import {
@@ -399,10 +399,8 @@ export async function mcpHandler(
     }
     const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders);
     if (!auth.ok) return auth.response;
-    if (auth.context.kind === 'pro') {
-      const proCheck = await runProPreChecks(auth.context, deps, resourceMetadataUrl, corsHeaders, ctx);
-      if (proCheck) return proCheck;
-    }
+    const getPreCheck = await runContextPreChecks(auth.context, deps, resourceMetadataUrl, corsHeaders, ctx);
+    if (getPreCheck) return getPreCheck;
     const getLimited = await applyPerMinuteLimit(auth.context, corsHeaders);
     if (getLimited) return getLimited;
     return handleSseReplay(req, corsHeaders);
@@ -467,10 +465,8 @@ export async function mcpHandler(
     const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders);
     if (!auth.ok) return auth.response;
     context = auth.context;
-    if (context.kind === 'pro') {
-      const proCheck = await runProPreChecks(context, deps, resourceMetadataUrl, corsHeaders, ctx);
-      if (proCheck) return proCheck;
-    }
+    const preCheck = await runContextPreChecks(context, deps, resourceMetadataUrl, corsHeaders, ctx);
+    if (preCheck) return preCheck;
     const limited = await applyPerMinuteLimit(context, corsHeaders);
     if (limited) return limited;
   }
