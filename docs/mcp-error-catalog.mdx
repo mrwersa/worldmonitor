@@ -9,7 +9,7 @@ description: "Every error shape WorldMonitor's MCP server can emit — JSON-RPC 
   emission site below should appear in the page.
 
   - JSON-RPC envelope helpers           api/mcp/rpc.ts:7-13
-  - Origin / method gates               api/mcp/handler.ts:35-49
+  - Method gate (405 + Allow)           api/mcp/handler.ts (mcpHandler method check)
   - Top-level dispatch / -32600/-32601  api/mcp/handler.ts:66-164
   - Auth -32001 / -32603 emitters       api/mcp/auth.ts:126-238
   - Per-minute -32029                   api/mcp/auth.ts:243-260
@@ -230,15 +230,13 @@ Every status the MCP handler can return. Most JSON-RPC replies — including mos
 | **202** | empty                     | n/a              | `notifications/initialized` — JSON-RPC notifications take no response body, per spec |
 | **204** | empty                     | n/a              | `OPTIONS` preflight                                                  |
 | **401** | JSON-RPC envelope         | `-32001`         | Missing/invalid/expired credentials, revoked Pro MCP token, inactive subscription. `WWW-Authenticate` header set. |
-| **403** | plain `"Forbidden"`       | n/a (NOT JSON-RPC)| `Origin` header is present and is not `https://claude.ai` or `https://claude.com`. Server-to-server callers (no `Origin`) are exempt. |
-| **405** | empty                     | n/a              | Request method is not `POST`, `HEAD`, or `OPTIONS`. `Allow: POST, HEAD, OPTIONS` header set. |
+| **405** | empty                     | n/a              | Request method is not `POST`, `GET`, `HEAD`, or `OPTIONS` (or a bare `GET` with no `Last-Event-ID`). `Allow: POST, GET, HEAD, OPTIONS` header set. |
 | **429** | JSON-RPC envelope         | `-32029`         | **Pro daily cap exceeded only.** `Retry-After: <seconds-until-UTC-midnight>` set. (Per-minute throttle returns `-32029` inside HTTP 200 — see `-32029` above.) |
 | **503** | JSON-RPC envelope         | `-32603`         | Auth service unavailable, `MCP_INTERNAL_HMAC_SECRET` misconfigured, or quota-reservation Redis failure. `Retry-After: 5`. |
 
-Two HTTP statuses appear that aren't JSON-RPC errors:
+One HTTP status appears that isn't a JSON-RPC error:
 
-- **403 with a plain `Forbidden` body** comes from origin-validation BEFORE the JSON-RPC layer runs. Don't try to `JSON.parse` the body. This is only relevant to browser-origin clients; CLI clients, Claude Desktop, and `curl` send no `Origin` header and are exempt.
-- **405 with an empty body** comes from method-validation BEFORE JSON-RPC. The handler accepts `POST` (the JSON-RPC path), `HEAD` (a 200 ack with `Content-Type: application/json`, used by uptime probes), and `OPTIONS` (CORS preflight). Anything else gets 405 + `Allow: POST, HEAD, OPTIONS`.
+- **405 with an empty body** comes from method-validation BEFORE JSON-RPC. The handler accepts `POST` (the JSON-RPC path), `GET` (the standalone SSE stream / `Last-Event-ID` replay channel), `HEAD` (a 200 ack with `Content-Type: application/json`, used by uptime probes), and `OPTIONS` (CORS preflight). A bare `GET` with no `Last-Event-ID` also returns 405 (no standalone stream is offered). Anything else gets 405 + `Allow: POST, GET, HEAD, OPTIONS`. The endpoint enforces no `Origin` allowlist: it advertises wildcard CORS and authenticates by explicit `Authorization` / `X-WorldMonitor-Key` header, so browser-origin clients (any origin) are accepted.
 
 ## Soft-behavior envelopes
 

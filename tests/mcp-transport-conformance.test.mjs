@@ -341,6 +341,76 @@ describe('api/mcp.ts — transport conformance over real HTTP', () => {
     assert.equal(replayed.length, 0, 'resume after the sole follow-up event replays nothing');
   });
 
+  it('completes the handshake for browser clients from ANY origin (issue #4802)', async () => {
+    // The endpoint advertises `access-control-allow-origin: *`, so the preflight
+    // succeeds for every origin — the actual POST must not then be rejected by an
+    // Origin allowlist. Auth is API-key/Bearer (no cookies), so a cross-origin
+    // browser request carries no ambient credentials and there is no CSRF surface;
+    // MCP-spec Origin validation targets DNS rebinding against localhost servers,
+    // not public HTTPS endpoints. Regression: a claude.ai/claude.com-only allowlist
+    // 403'd ChatGPT web connectors, MCP Inspector (localhost origin), and every
+    // other browser-context client AFTER their preflight had already succeeded.
+    for (const origin of ['https://chatgpt.com', 'http://localhost:3000', 'https://ora.ai']) {
+      // The exact browser flow the bug broke: preflight succeeds (204 + wildcard),
+      // then the actual POST must succeed too — not 403 after a green preflight.
+      const preflight = await fetch(server.url, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: origin,
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'content-type,authorization',
+        },
+      });
+      assert.equal(preflight.status, 204, `OPTIONS preflight from ${origin} must be 204`);
+      assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
+
+      // Accept: application/json returns a single complete JSON-RPC body (no open
+      // SSE stream to drain), so the response settles immediately.
+      const res = await fetch(server.url, {
+        method: 'POST',
+        headers: mcpHeaders({ Origin: origin, Accept: 'application/json' }),
+        body: JSON.stringify(initBody(40)),
+      });
+      assert.equal(res.status, 200, `POST initialize with Origin: ${origin} must be 200, got ${res.status}`);
+      assert.equal(res.headers.get('access-control-allow-origin'), '*',
+        'CORS wildcard must hold on the actual response, not just preflight');
+      // Load-bearing invariant that makes wildcard CORS safe here: /mcp must NEVER
+      // pair `ACAO: *` with credentialed CORS. If a refactor swapped /mcp onto the
+      // reflected-origin + Allow-Credentials helper, ambient-credential CSRF would
+      // reopen on a now-gateless endpoint — pin it closed.
+      assert.equal(res.headers.get('access-control-allow-credentials'), null,
+        '/mcp must not emit Access-Control-Allow-Credentials alongside wildcard ACAO');
+      assert.equal((await res.json()).result?.serverInfo?.name, 'worldmonitor',
+        'foreign-origin POST must complete a real initialize, not just return 200');
+    }
+  });
+
+  it('does not 403 the GET branches for a foreign origin either (issue #4802)', async () => {
+    // The removed allowlist sat before method dispatch, so it previously 403'd GET
+    // as well as POST. Both GET sub-paths must now reach their normal handling for
+    // a browser origin — never the old pre-auth 403.
+    const bareGet = await fetch(server.url, {
+      method: 'GET',
+      headers: { Accept: 'text/event-stream', Origin: 'https://chatgpt.com' },
+    });
+    assert.equal(bareGet.status, 405, 'bare GET from a foreign origin must be 405 (no standalone stream), not 403');
+    assert.match(bareGet.headers.get('allow') ?? '', /\bPOST\b/);
+
+    // A GET+Last-Event-ID without the required Accept is a replay header error
+    // (406) — the point is it reaches replay validation instead of the old 403.
+    const replay = await fetch(server.url, {
+      method: 'GET',
+      headers: {
+        Origin: 'https://chatgpt.com',
+        Authorization: `Bearer ${PRO_BEARER}`,
+        'Mcp-Session-Id': crypto.randomUUID(),
+        'Last-Event-ID': 'stream:0',
+      },
+    });
+    assert.notEqual(replay.status, 403, 'foreign-origin SSE replay must reach the authed replay path, not a pre-auth 403');
+    assert.equal(replay.status, 406, 'replay without Accept: text/event-stream is a 406 header error');
+  });
+
   it('honors Accept q=0 and preserves CORS on streamed JSON-RPC errors', async () => {
     const initialize = await fetch(server.url, {
       method: 'POST',

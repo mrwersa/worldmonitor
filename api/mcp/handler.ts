@@ -341,12 +341,10 @@ export async function mcpHandler(
     return new Response(null, { status: 200, headers: withMcpNoStore({ 'Content-Type': 'application/json', ...corsHeaders }) });
   }
 
-  // /.well-known/mcp manifest GET — served BEFORE Origin validation: the card
-  // is public static data, and browser-context fetchers (WebMCP agents) send
-  // an Origin header the gate below would 403. A GET that asks for
-  // `text/event-stream` (an SDK opening the optional standalone stream) or
-  // carries `Last-Event-ID` (SSE replay) falls through to the normal endpoint
-  // GET handling so transport semantics stay identical to /mcp.
+  // /.well-known/mcp manifest GET: the card is public static data. A GET that
+  // asks for `text/event-stream` (an SDK opening the optional standalone
+  // stream) or carries `Last-Event-ID` (SSE replay) falls through to the
+  // normal endpoint GET handling so transport semantics stay identical to /mcp.
   if (
     req.method === 'GET' &&
     WELL_KNOWN_MCP_PATHS.has(new URL(req.url).pathname) &&
@@ -356,11 +354,12 @@ export async function mcpHandler(
     return serveServerCard(req, corsHeaders);
   }
 
-  // Origin validation: allow claude.ai/claude.com web clients; allow absent origin (desktop/CLI)
-  const origin = req.headers.get('Origin');
-  if (origin && origin !== 'https://claude.ai' && origin !== 'https://claude.com') {
-    return new Response('Forbidden', { status: 403, headers: withMcpNoStore(corsHeaders) });
-  }
+  // No Origin gate (issue #4802): the endpoint advertises CORS `*`, auth is
+  // API-key/Bearer (no cookies → no CSRF surface), and MCP-spec Origin
+  // validation targets DNS rebinding against localhost servers — not a public
+  // HTTPS endpoint. A claude.ai-only allowlist here 403'd ChatGPT web
+  // connectors, MCP Inspector (localhost origin), and every other
+  // browser-context client AFTER their preflight had already succeeded.
 
   if (req.method !== 'POST' && req.method !== 'GET') {
     return new Response(null, { status: 405, headers: withMcpNoStore({ Allow: 'POST, GET, HEAD, OPTIONS', ...corsHeaders }) });
