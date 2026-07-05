@@ -1635,3 +1635,51 @@ describe('agent readiness: homepage Link headers', () => {
     assert.strictEqual(dashboard.value, dashboardHtml.value);
   });
 });
+
+// Content-Signal (contentsignals.org draft RFC) is declared in TWO places:
+// the robots.txt group directive (what agent-readiness scanners read) and the
+// origin-wide HTTP response header in vercel.json. The two values must never
+// drift apart, and the robots.txt line must live inside the `User-agent: *`
+// group (a blank line would end the group and orphan the directive).
+// Lighthouse's robots.txt validator safelists `content-signal`, so the
+// directive no longer costs SEO points (#4471 history).
+describe('agent readiness: Content-Signal declarations', () => {
+  const robotsSource = readFileSync(resolve(__dirname, '../public/robots.txt'), 'utf-8');
+
+  const headerValue = () => {
+    for (const block of vercelConfig.headers ?? []) {
+      const hit = (block.headers ?? []).find((h) => h.key === 'Content-Signal');
+      if (hit) return hit.value;
+    }
+    return null;
+  };
+
+  it('vercel.json serves an origin-wide Content-Signal header', () => {
+    const value = headerValue();
+    assert.ok(value, 'vercel.json must carry a Content-Signal response header');
+    assert.match(value, /ai-train=(yes|no)/);
+    assert.match(value, /search=(yes|no)/);
+    assert.match(value, /ai-input=(yes|no)/);
+  });
+
+  it('robots.txt declares the same Content-Signal inside the User-agent group', () => {
+    const lines = robotsSource.split('\n');
+    const uaIndex = lines.findIndex((l) => l.trim().toLowerCase() === 'user-agent: *');
+    assert.ok(uaIndex !== -1, 'robots.txt must have a `User-agent: *` group');
+    const signalIndex = lines.findIndex((l) => l.startsWith('Content-Signal:'));
+    assert.ok(signalIndex > uaIndex, 'Content-Signal directive must appear after `User-agent: *`');
+    for (let i = uaIndex + 1; i < signalIndex; i++) {
+      assert.notStrictEqual(
+        lines[i].trim(),
+        '',
+        'Content-Signal must not be separated from its User-agent group by a blank line'
+      );
+    }
+    const robotsValue = lines[signalIndex].slice('Content-Signal:'.length).trim();
+    assert.strictEqual(
+      robotsValue,
+      headerValue(),
+      'robots.txt Content-Signal must match the vercel.json header value'
+    );
+  });
+});

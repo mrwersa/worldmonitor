@@ -1,11 +1,15 @@
 # World Monitor - protect API routes from crawlers
 
-# AI content-usage preferences (contentsignals.org draft RFC) are served as the
-# origin-wide `Content-Signal` HTTP response header (see vercel.json), NOT as a
-# robots.txt body directive — Lighthouse's robots.txt validator rejects unknown
-# directives and would drop the SEO score (#4471). Do not re-add it here.
+# AI content-usage preferences (contentsignals.org draft RFC) are declared BOTH
+# as the Content-Signal group directive below (what agent-readiness scanners
+# read) and as the origin-wide `Content-Signal` HTTP response header
+# (vercel.json) — keep the two values in sync (guarded in
+# tests/deploy-config.test.mjs). Lighthouse's robots.txt validator now
+# safelists `content-signal`, so the #4471 SEO regression that once forced the
+# header-only placement no longer applies.
 
 User-agent: *
+Content-Signal: ai-train=no, search=yes, ai-input=yes
 Allow: /
 Allow: /api/story
 Allow: /api/og-story
