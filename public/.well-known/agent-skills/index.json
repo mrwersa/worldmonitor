@@ -77,7 +77,7 @@
       "type": "skill-md",
       "description": "Retrieve active cyber-threat intelligence — malware IOCs, C2 infrastructure, and CISA known-exploited vulnerabilities — filterable by type, source, and severity. Use when the user asks about current cyber threats, IOCs, or actively exploited CVEs.",
       "url": "https://worldmonitor.app/.well-known/agent-skills/scan-cyber-threats/SKILL.md",
-      "digest": "sha256:a4560f20b18f3ee856fe0574230dd9ce63a77c7d277235de6c2067031a2e61a9"
+      "digest": "sha256:78a646d6d7020317d0fc53812c2d51a14247bd78844101e77dc9431c6f802505"
     },
     {
       "name": "track-conflict-events",
