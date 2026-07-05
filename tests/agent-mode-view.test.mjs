@@ -23,12 +23,13 @@ const vercelConfig = JSON.parse(readFileSync(join(ROOT, 'vercel.json'), 'utf-8')
 describe('agent-mode view (/?mode=agent)', () => {
   it('agent-view.json carries the machine-readable essentials', () => {
     assert.equal(view.kind, 'agent-view');
-    for (const key of ['product', 'url', 'description', 'endpoints', 'auth', 'capabilities', 'discovery']) {
+    for (const key of ['product', 'url', 'description', 'endpoints', 'authentication', 'rateLimits', 'documentation', 'capabilities', 'discovery']) {
       assert.ok(key in view, `agent-view.json missing ${key}`);
     }
     assert.ok(Array.isArray(view.capabilities) && view.capabilities.length >= 5);
-    assert.ok(view.auth.apiKey.header === 'X-WorldMonitor-Key');
-    assert.ok(view.auth.oauth2.scope === 'mcp');
+    assert.ok(view.authentication.apiKey.header === 'X-WorldMonitor-Key');
+    assert.ok(view.authentication.oauth2.scope === 'mcp');
+    assert.match(view.authentication.summary, /Authentication/);
   });
 
   it('stays in parity with the MCP server card and A2A agent card', () => {

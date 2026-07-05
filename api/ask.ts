@@ -214,12 +214,19 @@ export default async function handler(req: Request): Promise<Response> {
     );
   }
   if (!params.query) {
+    // A query-less probe gets a 200 with a conformant, self-describing NLWeb
+    // envelope (empty results + usage) rather than a 4xx — scanners and
+    // agents doing a bare existence check read a 4xx as "no endpoint here"
+    // (orank's nlweb-ask detector did exactly that).
     return new Response(
       JSON.stringify({
-        _meta: buildMeta('error'),
-        error: "Missing 'query'. Send a natural-language question, e.g. {\"query\": \"live shipping chokepoint status\"}.",
+        _meta: buildMeta(params.mode),
+        query_id: params.queryId,
+        results: [],
+        message:
+          'Send a natural-language query: POST {"query": "..."} (JSON or form-encoded), or GET /ask?query=... . Set prefer.streaming=true (or Accept: text/event-stream) for SSE with start/result/complete events.',
       }),
-      { status: 400, headers: JSON_HEADERS },
+      { status: 200, headers: JSON_HEADERS },
     );
   }
 

@@ -32,7 +32,8 @@
       "url": "https://www.npmjs.com/package/worldmonitor"
     }
   },
-  "auth": {
+  "authentication": {
+    "summary": "Authentication: OAuth2 (scope=mcp) or an API key header. Discovery surfaces (tools/list, describe_tool, prompts/list, resources/list, /a2a, /ask) are anonymous — no authentication required.",
     "oauth2": {
       "authorizationServer": "https://worldmonitor.app/.well-known/oauth-authorization-server",
       "protectedResource": "https://worldmonitor.app/.well-known/oauth-protected-resource",
@@ -46,6 +47,11 @@
     "guide": "https://worldmonitor.app/auth.md",
     "plansAndLimits": "https://worldmonitor.app/pricing.md"
   },
+  "rateLimits": {
+    "anonymous": "60 requests/min per IP on public MCP methods, /a2a and /ask",
+    "authenticated": "per-plan daily quotas — see https://worldmonitor.app/pricing.md"
+  },
+  "documentation": "https://www.worldmonitor.app/docs/documentation",
   "capabilities": [
     "real-time market data (equities, commodities, crypto, FX)",
     "conflict events and country instability/risk scores (196 countries)",

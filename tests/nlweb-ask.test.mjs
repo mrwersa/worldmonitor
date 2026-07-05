@@ -114,10 +114,15 @@ describe('nlweb: /ask endpoint', () => {
     assert.ok(body.results.length > 0);
   });
 
-  it('missing query → 400 with a self-describing _meta error; malformed JSON → 400', async () => {
+  it('query-less probes get a 200 self-describing NLWeb envelope (scanner existence checks read 4xx as absent)', async () => {
     const empty = await post({});
-    assert.equal(empty.status, 400);
-    assert.equal((await empty.json())._meta.response_type, 'error');
+    assert.equal(empty.status, 200);
+    const body = await empty.json();
+    assert.ok(body._meta.response_type, 'usage envelope must stay _meta-conformant');
+    assert.deepEqual(body.results, []);
+    assert.match(body.message, /query/);
+    const bareGet = await handler(new Request('https://worldmonitor.app/ask', { method: 'GET' }));
+    assert.equal(bareGet.status, 200);
     const bad = await post('{not json');
     assert.equal(bad.status, 400);
   });
