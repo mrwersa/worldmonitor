@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Emits public/.well-known/agent-skills/index.json per the Agent Skills
 // Discovery RFC v0.2.0. Each entry points at a SKILL.md and carries a
-// sha256 of that file's exact served bytes, so agents can verify the
-// skill text hasn't changed since they last fetched it.
+// digest ("sha256:<hex>") of that file's exact served bytes, so agents can
+// verify the skill text hasn't changed since they last fetched it.
 //
 // Source of truth: public/.well-known/agent-skills/<name>/SKILL.md
 // Output:          public/.well-known/agent-skills/index.json
@@ -22,7 +22,10 @@ const SKILLS_DIR = resolve(ROOT, 'public/.well-known/agent-skills');
 const INDEX_PATH = join(SKILLS_DIR, 'index.json');
 const PUBLIC_BASE = 'https://worldmonitor.app';
 
-const SCHEMA = 'https://agentskills.io/schemas/v0.2.0/index.json';
+// Canonical v0.2.0 discovery-schema URL. Graders (orank/ora.ai Identity
+// `agent-skills-index-v2`) string-match this exact value; the earlier
+// agentskills.io/schemas/... spelling reads as "unknown version" to them.
+const SCHEMA = 'https://schemas.agentskills.io/discovery/0.2.0/schema.json';
 
 // Top-level, publisher-level "when to use this" guidance embedded directly in
 // the discovery manifest. Discovery graders (e.g. orank/ora.ai's Identity
@@ -93,10 +96,12 @@ function collectSkills() {
     }
     return {
       name,
-      type: 'task',
+      // v0.2.0 entry types are `skill-md` (a bare SKILL.md) or `archive`;
+      // every entry here points at a served SKILL.md.
+      type: 'skill-md',
       description: fm.description,
       url: `${PUBLIC_BASE}/.well-known/agent-skills/${name}/SKILL.md`,
-      sha256: sha256Hex(bytes),
+      digest: `sha256:${sha256Hex(bytes)}`,
     };
   });
 }
