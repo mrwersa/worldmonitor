@@ -168,6 +168,11 @@ describe('deploy/cache configuration guardrails', () => {
     assertGlobIgnore('pro/**');
     assertGlobIgnore('favico/**');
     assertGlobIgnore('textures/**');
+    // #4891: blog OG covers exist only in prod builds (blog generated at
+    // deploy), so a local dist/sw.js never exposes the regression — guard the
+    // config directly. Without this ignore, every first dashboard visit
+    // precached ~40 blog PNGs (~700KB) through the service worker.
+    assertGlobIgnore('blog/**');
   });
 
   it('keeps the lazy Clerk SDK out of the PWA precache', () => {

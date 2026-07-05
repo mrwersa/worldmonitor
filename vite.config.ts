@@ -979,6 +979,12 @@ export default defineConfig(({ mode }) => {
             'pro/**',
             'favico/**',
             'textures/**',
+            // #4891: blog OG covers + post images are generated into the prod
+            // build (absent locally), and the png glob was precaching all ~40
+            // of them (~700KB) on every first dashboard visit — and again on
+            // each SW update after a blog deploy. Blog pages fetch their own
+            // images on demand; the dashboard never needs them.
+            'blog/**',
           ],
           // globe.gl + three.js grows main bundle past the 2 MiB default limit
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
