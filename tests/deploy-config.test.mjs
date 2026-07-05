@@ -16,7 +16,7 @@ const middlewareSource = readFileSync(resolve(__dirname, '../middleware.ts'), 'u
 const dockerfileSource = readFileSync(resolve(__dirname, '../Dockerfile'), 'utf-8');
 const dockerNginxSource = readFileSync(resolve(__dirname, '../docker/nginx.conf'), 'utf-8');
 const frontendDockerfileSource = readFileSync(resolve(__dirname, '../docker/Dockerfile'), 'utf-8');
-const SPA_HTML_CACHE_SOURCE = '/((?!api|mcp|a2a|oauth|assets|blog|docs|embed|embed\\.html|favico|map-styles|data|textures|pro|sw\\.js|workbox-[a-f0-9]+\\.js|manifest\\.webmanifest|offline\\.html|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|openapi\\.yaml|openapi\\.json|auth\\.md|\\.well-known|wm-widget-sandbox\\.html|mcp-grant\\.html|mcp-grant).*)';
+const SPA_HTML_CACHE_SOURCE = '/((?!api|mcp|a2a|ask|oauth|assets|blog|docs|embed|embed\\.html|favico|map-styles|data|textures|pro|sw\\.js|workbox-[a-f0-9]+\\.js|manifest\\.webmanifest|offline\\.html|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|openapi\\.yaml|openapi\\.json|auth\\.md|\\.well-known|wm-widget-sandbox\\.html|mcp-grant\\.html|mcp-grant).*)';
 const GLOBAL_SECURITY_HEADER_SOURCE = '/((?!docs|embed|embed\\.html).*)';
 const APP_ROOT_HOST_PATTERN = '^(?:(?:www|tech|finance|commodity|happy|energy)\\.)?worldmonitor\\.app$';
 const GLOBAL_CSP_INLINE_SCRIPT_HTML_FILES = [
@@ -218,7 +218,13 @@ const DASHBOARD_HTML_DESTINATION = '/dashboard.html';
 // rewrite. /welcome and /index.html redirect to root so crawlers and humans do
 // not see duplicate landing URLs.
 describe('welcome landing page routing', () => {
-  const getRootRewrite = () => vercelConfig.rewrites.find((r) => r.source === '/');
+  // A `/` rewrite gated on a query condition (e.g. /?mode=agent →
+  // /agent-view.json) never matches a plain navigation, so the app-root
+  // welcome rewrite is the first `/` rule WITHOUT a query condition.
+  const getRootRewrite = () =>
+    vercelConfig.rewrites.find(
+      (r) => r.source === '/' && !(r.has ?? []).some((condition) => condition.type === 'query')
+    );
   const getSpaCatchAllRewrite = () => vercelConfig.rewrites.find((r) =>
     r.destination === DASHBOARD_HTML_DESTINATION && r.source.startsWith('/((?!')
   );
@@ -231,7 +237,7 @@ describe('welcome landing page routing', () => {
   };
 
   it('declares / as the app-root welcome rewrite after moving dashboard HTML off root index', () => {
-    const rewrite = vercelConfig.rewrites.find((r) => r.source === '/');
+    const rewrite = getRootRewrite();
     assert.ok(rewrite, 'expected a rewrite for /');
     assert.equal(rewrite.destination, '/pro/welcome.html');
     assert.deepEqual(rewrite.has, [

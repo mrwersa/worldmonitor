@@ -270,6 +270,10 @@ export const ENDPOINT_RATE_POLICIES: Record<string, EndpointRatePolicy> = {
   // defence; 60/min mirrors the MCP public-method posture. Enforced
   // in-handler via `checkScopedRateLimit`, same pattern as /api/mcp-proxy.
   '/api/a2a': { limit: 60, window: '60 s' },
+  // NLWeb /ask endpoint (`api/ask.ts`, external-protocol exception — request/
+  // response shape dictated by the NLWeb spec, served at /ask). Same anonymous
+  // cheap-catalog posture as /api/a2a, same in-handler enforcement.
+  '/api/ask': { limit: 60, window: '60 s' },
 };
 
 interface RateLimitPolicyDecision {

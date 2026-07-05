@@ -3,6 +3,13 @@
   "schema_version": 1,
   "exceptions": [
     {
+      "path": "api/ask.ts",
+      "category": "external-protocol",
+      "reason": "NLWeb /ask endpoint (Microsoft NLWeb protocol) — request/response envelope (_meta {response_type, version}, SSE start/result/complete event stream) dictated by the NLWeb spec, not something we can redefine as proto. Anonymous discovery answers over the public MCP tool catalog only; per-IP limit registered in ENDPOINT_RATE_POLICIES and enforced in-handler.",
+      "owner": "@SebastienMelki",
+      "removal_issue": null
+    },
+    {
       "path": "api/a2a.ts",
       "category": "external-protocol",
       "reason": "A2A (Agent-to-Agent) JSON-RPC 2.0 endpoint behind /.well-known/agent-card.json — envelope and method surface (message/send, tasks/*) dictated by the A2A spec v0.3.0, not something we can redefine as proto. Anonymous concierge over the public MCP tool catalog + public freshness envelope only; per-IP limit registered in ENDPOINT_RATE_POLICIES and enforced in-handler.",
