@@ -303,6 +303,7 @@ async function buildProductionRows(
   // single counter with no 5-bucket history to express sustained_burst.
   const burstApl = `['wm_api_usage']
 | where event_type == "request" and _time > ago(10m)
+| where auth_kind in ("user_api_key", "enterprise_api_key") and status < 400
 | where isnotnull(customer_id) and customer_id != ""
 | summarize usage = count() by customer_id, minute = bin(_time, 1m)`;
   const burst = await queryAxiom(burstApl, "api_minute_burst");
@@ -452,6 +453,18 @@ async function scanHandler(ctx: any, args: {
     const ent = byUser.get(row.userId);
     if (!ent) {
       summary.skipped.push({ userId: row.userId, dimension: row.dimension, reason: "unknown_or_inactive_entitlement" });
+      continue;
+    }
+    // An api_* dimension only applies to accounts that actually hold API access.
+    // Pro (and free) entitlements have apiAccess:false but a 0 planLimit for the
+    // api dims, and their ordinary Clerk-session dashboard traffic still lands in
+    // wm_api_usage with a customer_id — so without this gate the Axiom burst read
+    // would attribute those requests to the Pro user and mint a false
+    // "over API plan limit" notice + upsell email. Mirrors the daily read, which
+    // only pushes api_daily_requests rows for apiAccess entitlements.
+    const isApiDimension = row.dimension === "api_daily_requests" || row.dimension === "api_minute_burst";
+    if (isApiDimension && !ent.apiAccess) {
+      summary.skipped.push({ userId: row.userId, dimension: row.dimension, reason: "no_api_access" });
       continue;
     }
     const planKey = row.planKey ?? ent.planKey;

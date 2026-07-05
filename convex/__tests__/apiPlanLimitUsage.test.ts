@@ -401,6 +401,38 @@ describe("api plan-limit usage scanner", () => {
     expect(stillCurrent).toHaveLength(0);
   });
 
+  test("does not notify a Pro (no apiAccess) account on an api_* dimension", async () => {
+    const t = convexTest(schema, modules);
+    await seedEntitlement(t, "user-pro", "pro_monthly");
+
+    // Pro has apiAccess:false and apiBurstRequestsPerMinute:0. Its ordinary
+    // Clerk-session dashboard traffic can still surface as an api_minute_burst
+    // row keyed by the user (via the Axiom customer_id read). Without the
+    // apiAccess gate, limit=0 would classify five active minutes as a phantom
+    // sustained_burst and fire an "over API plan limit" upsell email.
+    const summary = await t.action(usageFns.scanApiPlanLimitUsageInternal, {
+      now: NOW,
+      rows: [{
+        userId: "user-pro",
+        dimension: "api_minute_burst",
+        usage: 500,
+        minuteBuckets: [500, 500, 500, 500, 500],
+        source: "test",
+      }],
+    });
+
+    expect(summary.evaluated).toBe(0);
+    expect(summary.wouldNotify).toBe(0);
+    expect(summary.notified).toBe(0);
+    expect(summary.skipped).toContainEqual({
+      userId: "user-pro",
+      dimension: "api_minute_burst",
+      reason: "no_api_access",
+    });
+    const notices = await t.run((ctx) => ctx.db.query("apiPlanLimitNotices").collect());
+    expect(notices).toHaveLength(0);
+  });
+
   test("skips rows that cannot be joined to an active entitlement", async () => {
     const t = convexTest(schema, modules);
 
