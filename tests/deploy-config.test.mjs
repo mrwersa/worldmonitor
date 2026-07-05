@@ -1726,3 +1726,79 @@ describe('vercel deployment excludes api test files', () => {
     }
   });
 });
+
+// Registry branding + ARD catalog (ora.ai Discovery checks). The MCP
+// server-card must carry the full branding trio (name, icon, description —
+// `registry-branding`), and /.well-known/ai-catalog.json publishes the ARD
+// manifest (`ard-catalog` bonus): host identity plus domain-anchored
+// urn:air: entries, each with a media type, URL, and trust manifest —
+// mirroring ora's own /api/ard/catalog dialect, which is what their parser
+// reads.
+describe('agent readiness: registry branding + ARD catalog', () => {
+  const serverCard = JSON.parse(
+    readFileSync(resolve(__dirname, '../public/.well-known/mcp/server-card.json'), 'utf-8')
+  );
+  const aiCatalog = JSON.parse(
+    readFileSync(resolve(__dirname, '../public/.well-known/ai-catalog.json'), 'utf-8')
+  );
+
+  it('server-card carries the full branding trio and the icon asset exists', () => {
+    assert.ok(serverCard.name, 'server-card must have a name');
+    assert.ok(serverCard.description, 'server-card must have a description');
+    assert.match(
+      serverCard.icon ?? '',
+      /^https:\/\/(www\.)?worldmonitor\.app\//,
+      'server-card icon must be an absolute worldmonitor.app URL'
+    );
+    const iconPath = new URL(serverCard.icon).pathname;
+    assert.ok(
+      existsSync(resolve(__dirname, `../public${iconPath}`)),
+      `server-card icon must point at a real public asset (public${iconPath})`
+    );
+  });
+
+  it('ai-catalog.json declares the World Monitor host identity', () => {
+    assert.strictEqual(aiCatalog.specVersion, '1.0');
+    assert.strictEqual(aiCatalog.host?.displayName, 'World Monitor');
+    assert.strictEqual(aiCatalog.host?.identifier, 'did:web:worldmonitor.app');
+    assert.ok(Array.isArray(aiCatalog.entries) && aiCatalog.entries.length >= 2);
+  });
+
+  it('every ai-catalog entry is domain-anchored and complete', () => {
+    for (const entry of aiCatalog.entries) {
+      const label = `ai-catalog entry ${entry.identifier}`;
+      assert.match(
+        entry.identifier ?? '',
+        /^urn:air:worldmonitor\.app:[a-z-]+:[a-z0-9-]+$/,
+        `${label} must be a domain-anchored urn:air URN`
+      );
+      assert.ok(entry.displayName, `${label} needs a displayName`);
+      assert.ok(entry.type, `${label} needs a media type`);
+      assert.ok(entry.description, `${label} needs a description`);
+      assert.match(
+        entry.url ?? '',
+        /^https:\/\/(www\.)?worldmonitor\.app\//,
+        `${label} URL must be same-origin`
+      );
+      assert.strictEqual(
+        entry.trustManifest?.identity,
+        'did:web:worldmonitor.app',
+        `${label} trust identity must be the domain DID`
+      );
+    }
+  });
+
+  it('the ai-catalog MCP entry points at the real server-card path', () => {
+    const mcpEntry = aiCatalog.entries.find((e) => e.type === 'application/mcp-server-card+json');
+    assert.ok(mcpEntry, 'ai-catalog must list the MCP server');
+    assert.ok(
+      mcpEntry.url.endsWith('/.well-known/mcp/server-card.json'),
+      'MCP entry URL must target the published server-card'
+    );
+    assert.ok(
+      existsSync(resolve(__dirname, '../public/.well-known/agent-skills/index.json')) ===
+        aiCatalog.entries.some((e) => e.url.endsWith('/.well-known/agent-skills/index.json')),
+      'agent-skills entry must exist iff the skills index is published'
+    );
+  });
+});
