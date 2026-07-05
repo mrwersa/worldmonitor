@@ -90,7 +90,12 @@ export type RequestReason =
   | 'idempotency_invalid'
   | 'idempotent_replay'
   | 'idempotency_conflict'
-  | 'idempotency_mismatch';
+  | 'idempotency_mismatch'
+  // #4866 — auth backend (Convex/Redis) unreachable during credential or
+  // entitlement resolution on /mcp: the caller was told 503 + Retry-After.
+  // Distinct from auth_401 so a backend outage never reads as a wave of
+  // invalid credentials.
+  | 'auth_unavailable';
 
 export interface RequestEvent {
   _time: string;

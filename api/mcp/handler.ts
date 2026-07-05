@@ -28,6 +28,7 @@ import {
 import { rpcError, rpcOk, withMcpNoStore } from './rpc';
 import { buildUiResourceRead, isUiResourceUri, UI_RESOURCE_LIST_RESPONSE } from './ui/registry';
 import { emitTelemetry, principalIdForLog } from './telemetry';
+import { createMcpUsage, emitMcpRequestEvent, setUsageContext, type McpUsage } from './usage';
 import type { McpAuthContext, McpHandlerDeps } from './types';
 
 // MCP methods servable WITHOUT authentication. These are the zero-data
@@ -332,18 +333,44 @@ async function serveServerCard(req: Request, corsHeaders: Record<string, string>
 // ---------------------------------------------------------------------------
 // Main handler
 // ---------------------------------------------------------------------------
+// Thin emission wrapper (#4866): one wm_api_usage RequestEvent per servable
+// request, registered on ctx.waitUntil AFTER the response is computed. An
+// uncaught throw from the inner handler (the raw-500 class hardened in #4860)
+// still emits — with status 500 — before re-throwing, so platform 500s are
+// visible in Axiom even though they bypass every structured error path.
 export async function mcpHandler(
   req: Request,
   deps: McpHandlerDeps,
+  ctx?: { waitUntil: (p: Promise<unknown>) => void },
+): Promise<Response> {
+  const t0 = Date.now();
+  const usage = createMcpUsage();
+  let res: Response;
+  try {
+    res = await mcpHandlerInner(req, deps, usage, ctx);
+  } catch (err) {
+    emitMcpRequestEvent(req, new Response(null, { status: 500 }), usage, Date.now() - t0, ctx);
+    throw err;
+  }
+  emitMcpRequestEvent(req, res, usage, Date.now() - t0, ctx);
+  return res;
+}
+
+async function mcpHandlerInner(
+  req: Request,
+  deps: McpHandlerDeps,
+  usage: McpUsage,
   ctx?: { waitUntil: (p: Promise<unknown>) => void },
 ): Promise<Response> {
   // MCP is a public API endpoint secured by API key — allow all origins (claude.ai, Claude Desktop, custom agents)
   const corsHeaders = getMcpCorsHeaders();
 
   if (req.method === 'OPTIONS') {
+    usage.skip = true;
     return new Response(null, { status: 204, headers: withMcpNoStore(corsHeaders) });
   }
   if (req.method === 'HEAD') {
+    usage.skip = true;
     return new Response(null, { status: 200, headers: withMcpNoStore({ 'Content-Type': 'application/json', ...corsHeaders }) });
   }
 
@@ -357,6 +384,7 @@ export async function mcpHandler(
     !req.headers.get('last-event-id') &&
     !(req.headers.get('accept') ?? '').includes('text/event-stream')
   ) {
+    usage.skip = true;
     return serveServerCard(req, corsHeaders);
   }
 
@@ -368,6 +396,7 @@ export async function mcpHandler(
   // browser-context client AFTER their preflight had already succeeded.
 
   if (req.method !== 'POST' && req.method !== 'GET') {
+    usage.phase = 'transport';
     return new Response(null, { status: 405, headers: withMcpNoStore({ Allow: 'POST, GET, HEAD, OPTIONS', ...corsHeaders }) });
   }
 
@@ -392,18 +421,31 @@ export async function mcpHandler(
   //      fully authenticated (never a discovery surface).
   if (req.method === 'GET') {
     if (!req.headers.get('last-event-id')) {
+      usage.phase = 'transport';
       return new Response(null, {
         status: 405,
         headers: withMcpNoStore({ Allow: 'POST, GET, HEAD, OPTIONS', ...corsHeaders }),
       });
     }
     const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders);
-    if (!auth.ok) return auth.response;
+    if (!auth.ok) {
+      usage.phase = 'auth';
+      return auth.response;
+    }
+    setUsageContext(usage, auth.context);
     const getPreCheck = await runContextPreChecks(auth.context, deps, resourceMetadataUrl, corsHeaders, ctx);
-    if (getPreCheck) return getPreCheck;
+    if (getPreCheck) {
+      usage.phase = 'precheck';
+      return getPreCheck;
+    }
     const getLimited = await applyPerMinuteLimit(auth.context, corsHeaders);
-    if (getLimited) return getLimited;
-    return handleSseReplay(req, corsHeaders);
+    if (getLimited) {
+      usage.phase = 'limit';
+      return getLimited;
+    }
+    const replay = handleSseReplay(req, corsHeaders);
+    if (replay.status !== 200) usage.phase = 'transport';
+    return replay;
   }
 
   // Parse body BEFORE auth: the method decides whether credentials are required
@@ -414,10 +456,12 @@ export async function mcpHandler(
   try {
     body = await req.json();
   } catch {
+    usage.phase = 'malformed';
     return rpcError(null, -32600, 'Invalid request: malformed JSON', corsHeaders);
   }
 
   if (!body || typeof body.method !== 'string') {
+    usage.phase = 'malformed';
     return rpcError(body?.id ?? null, -32600, 'Invalid request: missing method', corsHeaders);
   }
 
@@ -453,22 +497,42 @@ export async function mcpHandler(
       // present-but-invalid key surfaces a 401 instead of a silent anon
       // downgrade; a valid principal is attributed for telemetry + limits.
       const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders);
-      if (!auth.ok) return auth.response;
+      if (!auth.ok) {
+        usage.phase = 'auth';
+        return auth.response;
+      }
       context = auth.context;
+      setUsageContext(usage, context);
       const limited = await applyPerMinuteLimit(context, corsHeaders);
-      if (limited) return limited;
+      if (limited) {
+        usage.phase = 'limit';
+        return limited;
+      }
     } else {
       const anonLimited = await applyAnonDiscoveryLimit(req, corsHeaders);
-      if (anonLimited) return anonLimited;
+      if (anonLimited) {
+        usage.phase = 'limit';
+        return anonLimited;
+      }
     }
   } else {
     const auth = await resolveAuthContext(req, deps, resourceMetadataUrl, corsHeaders);
-    if (!auth.ok) return auth.response;
+    if (!auth.ok) {
+      usage.phase = 'auth';
+      return auth.response;
+    }
     context = auth.context;
+    setUsageContext(usage, context);
     const preCheck = await runContextPreChecks(context, deps, resourceMetadataUrl, corsHeaders, ctx);
-    if (preCheck) return preCheck;
+    if (preCheck) {
+      usage.phase = 'precheck';
+      return preCheck;
+    }
     const limited = await applyPerMinuteLimit(context, corsHeaders);
-    if (limited) return limited;
+    if (limited) {
+      usage.phase = 'limit';
+      return limited;
+    }
   }
 
   // Dispatch
@@ -523,11 +587,17 @@ export async function mcpHandler(
       return maybeStreamJsonRpcResponse(req, rpcOk(id, {}, corsHeaders));
     case 'tools/list':
       return maybeStreamJsonRpcResponse(req, rpcOk(id, { tools: TOOL_LIST_RESPONSE }, corsHeaders));
-    case 'tools/call':
+    case 'tools/call': {
       // context is always set here — tools/call is never a PUBLIC_MCP_METHOD.
       // The guard narrows the type and hard-fails closed if that ever changes.
-      if (!context) return authRequiredResponse(id, resourceMetadataUrl, corsHeaders);
-      return maybeStreamJsonRpcResponse(req, await dispatchToolsCall(req, context, deps, body, corsHeaders, ctx));
+      if (!context) {
+        usage.phase = 'auth';
+        return authRequiredResponse(id, resourceMetadataUrl, corsHeaders);
+      }
+      const dispatched = await dispatchToolsCall(req, context, deps, body, corsHeaders, ctx);
+      if (dispatched.status === 429 || dispatched.status === 503) usage.phase = 'dispatch';
+      return maybeStreamJsonRpcResponse(req, dispatched);
+    }
     // Prompts are metadata-class — they ship a workflow template, not data.
     // Symmetric posture with `describe_tool`: quota-exempt (counting template
     // fetches against the 50/day cap would discourage exploration, which
@@ -584,8 +654,15 @@ export async function mcpHandler(
       // routes through dispatchToolsCall, inheriting the reservation +
       // telemetry path. `context` is always set here — a non-public
       // resources/read runs the gated path above; the guard fails closed.
-      if (!context) return authRequiredResponse(id, resourceMetadataUrl, corsHeaders);
-      return maybeStreamJsonRpcResponse(req, await buildResourceResponse(req, context, deps, body, corsHeaders, ctx));
+      if (!context) {
+        usage.phase = 'auth';
+        return authRequiredResponse(id, resourceMetadataUrl, corsHeaders);
+      }
+      {
+        const resourceRes = await buildResourceResponse(req, context, deps, body, corsHeaders, ctx);
+        if (resourceRes.status === 429 || resourceRes.status === 503) usage.phase = 'dispatch';
+        return maybeStreamJsonRpcResponse(req, resourceRes);
+      }
     case 'logging/setLevel': {
       const level = (body.params as { level?: string } | null)?.level;
       if (typeof level !== 'string' || !MCP_LOG_LEVELS.has(level)) {
