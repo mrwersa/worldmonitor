@@ -30,6 +30,8 @@ Pro subscribers can connect Claude Desktop / Cursor / claude.ai without ever pas
 
 Server identifier: `worldmonitor` v1.13.0.
 
+Registry listing: the server is published in the [official MCP registry](https://registry.modelcontextprotocol.io/v0/servers?search=worldmonitor) as `app.worldmonitor/mcp` — a domain-verified namespace, so clients that resolve servers through the registry get the same endpoint and metadata as the server card above.
+
 ### Protocol negotiation
 
 WorldMonitor's static server card at `/.well-known/mcp/server-card.json` advertises protocol version `2025-06-18`, and the live `initialize` handshake negotiates it by default — so the advertised floor and the negotiated version stay in lock-step:
