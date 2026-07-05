@@ -1,4 +1,5 @@
 import type { MeterResult } from './api-key-rate-limit';
+import { hashString64 } from './hash';
 
 export const API_OVERAGE_METER_ID = 'api.request' as const;
 
@@ -56,6 +57,12 @@ export function buildApiOverageUsageEvent(input: {
   const dailyCount = Number(input.meter?.count);
 
   if (!input.isUserApiKey || !userId || !route || !method || !usageDate) return null;
+  // The idempotency key is ':'-delimited. A ':' inside any free-form segment
+  // (userId, method, route) would shift the key's fields and could collapse two
+  // distinct requests onto one billing identity — reject rather than emit an
+  // ambiguous key. usageDate/status/dailyCount are validated numeric/date shapes
+  // and meterId is a constant, so they cannot introduce a delimiter.
+  if (userId.includes(':') || method.includes(':') || route.includes(':')) return null;
   if (!Number.isInteger(status) || status < 100 || status >= 500) return null;
   if (NON_BILLABLE_STATUSES.has(status)) return null;
   if (!input.meter?.metered || !Number.isSafeInteger(dailyCount) || dailyCount < 1) return null;
@@ -74,7 +81,10 @@ export function buildApiOverageUsageEvent(input: {
 
   return {
     meterId: API_OVERAGE_METER_ID,
-    eventId: `wm_api_request_${stableHash(idempotencyKey)}`,
+    // A compact, stable id derived from the key. It is a 64-bit hash and can
+    // collide in principle, so downstream dedupe MUST key on `idempotencyKey`,
+    // never on `eventId`.
+    eventId: `wm_api_request_${hashString64(idempotencyKey)}`,
     idempotencyKey,
     userId,
     route,
@@ -104,15 +114,4 @@ function normalizeRoute(value: string | null | undefined): string | null {
 function normalizeUsageDay(value: string | null | undefined): string | null {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
-}
-
-function stableHash(value: string): string {
-  let hash = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  const mask = 0xffffffffffffffffn;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= BigInt(value.charCodeAt(i));
-    hash = (hash * prime) & mask;
-  }
-  return hash.toString(36);
 }

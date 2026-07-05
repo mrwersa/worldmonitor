@@ -22,9 +22,9 @@ created_at: 2026-07-04
 
 ### Summary
 
-Phase 1 meters per-account REST API usage and enforces per-minute burst plus a daily allowance policy. PR #4684 removes the earlier 10x runaway-ceiling multiplier in favor of a hard daily cap in enforce mode; shadow mode still serves over-allowance requests uncounted-against-a-ceiling. Phase 2 needs that metered allowance to become billable overage through Dodo, but the epic still has unresolved commercial decisions. This increment creates the event contract that future async ingestion can consume once pricing and Dodo catalog decisions are resolved.
+Phase 1 meters per-account REST API usage and enforces per-minute burst plus a daily allowance policy. PR #4684 (open at the time of writing) would replace the earlier 10x runaway-ceiling multiplier with a hard daily cap in enforce mode; shadow mode would continue to serve over-allowance requests uncounted-against-a-ceiling. Phase 2 needs that metered allowance to become billable overage through Dodo, but the epic still has unresolved commercial decisions. This increment creates the event contract that future async ingestion can consume once pricing and Dodo catalog decisions are resolved.
 
-Sequencing note: the overage event fires only for *served* over-allowance requests (the shadow-mode path). It is therefore incompatible with #4684's hard-cap enforce mode, which refuses over-allowance requests with a 429 and rolls back the meter increment — the builder excludes those refusals (401/403/429 and 5xx are never billable). Reconciling billable overage with hard-cap enforcement needs an explicit opt-in overage mechanism and is tracked at the product level (epics #4560 / #4635), not in this slice.
+Sequencing note: the overage event fires only for *served* over-allowance requests (the shadow-mode path). It is therefore incompatible with #4684's proposed hard-cap enforce mode, which would refuse over-allowance requests with a 429 and roll back the meter increment — the builder excludes those refusals (401/403/429 and 5xx are never billable). Reconciling billable overage with hard-cap enforcement needs an explicit opt-in overage mechanism and is tracked at the product level (epics #4560 / #4635), not in this slice.
 
 ### Requirements
 
@@ -38,6 +38,8 @@ Sequencing note: the overage event fires only for *served* over-allowance reques
 
 - Deferred for later: Dodo meter creation, Dodo `POST /events/ingest`, customer-id resolution action, cron or `waitUntil` batching, 80%/100% credit balance emails, and customer spend caps.
 - Outside this slice: changing `apiDailyAllowance` values, changing the daily-cap / enforce-mode behavior (owned by #4684), or changing per-IP/per-account enforcement behavior.
+- Merge-order note: PR #4684 is not yet merged and edits the same `MeterResult` interface and `tests/api-key-rate-limit.test.mts` this PR touches. This PR's change there is additive (a new `usageDay` field + `apiKeyUsageDay` helper + one test), so whichever lands second resolves a textual, not semantic, conflict — the meter's UTC-day accessor is orthogonal to #4684's cap enforcement.
+- When wired: once the builder is called from `server/gateway.ts`, the `server/__tests__/*` meter mocks that hand-build a `MeterResult` (`reserveDailyMeter.mockResolvedValue(...)`) must add `usageDay` to stay representative. They are excluded from `typecheck:api`, so the omission is invisible until the gateway consumes the field.
 
 ### Sources
 

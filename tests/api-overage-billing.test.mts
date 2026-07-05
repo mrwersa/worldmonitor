@@ -79,11 +79,36 @@ describe('#4560 — API overage billable usage event contract', () => {
 
   it('requires a counted user API-key request', () => {
     assert.equal(build({ userId: '' }), null);
+    assert.equal(build({ route: '' }), null);
+    assert.equal(build({ method: '' }), null);
     assert.equal(build({ isUserApiKey: false }), null);
     assert.equal(build({ meter: { metered: false } }), null);
     assert.equal(build({ meter: { count: 1001.5 } }), null);
     assert.equal(build({ includedAllowance: -1 }), null);
     assert.equal(build({ includedAllowance: 1000.5 }), null);
+  });
+
+  it('returns null when the meter is null or undefined', () => {
+    // The build() helper always synthesizes a meter, so exercise the
+    // null/undefined branch directly through the real entry point.
+    const baseInput = {
+      userId: 'user_123',
+      route: '/api/news/v1/list-feed-digest',
+      method: 'get',
+      status: 200,
+      includedAllowance: 1000,
+      isUserApiKey: true,
+    };
+    assert.equal(buildApiOverageUsageEvent({ ...baseInput, meter: null }), null);
+    assert.equal(buildApiOverageUsageEvent({ ...baseInput, meter: undefined }), null);
+  });
+
+  it('rejects a colon in any free-form idempotency segment (delimiter safety)', () => {
+    // The idempotency key is ':'-joined; a ':' in userId/method/route could
+    // shift segments and alias two distinct requests onto one billing identity.
+    assert.equal(build({ userId: 'user:123' }), null);
+    assert.equal(build({ route: '/api/x:y/v1/z' }), null);
+    assert.equal(build({ method: 'GE:T' }), null);
   });
 
   it('requires a valid yyyy-mm-dd meter usage day', () => {
