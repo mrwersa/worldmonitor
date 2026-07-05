@@ -31,6 +31,22 @@ test('detailed health requires an operator API key before Redis is queried', asy
   assert.equal(res.headers.get('Access-Control-Allow-Origin'), 'https://worldmonitor.app');
 });
 
+test('the 401 carries WWW-Authenticate and points keyless callers at the public compact form', async () => {
+  // RFC 7235 §3.1 makes WWW-Authenticate mandatory on 401; resource_metadata
+  // (RFC 9728) is the agent-discovery pointer. The hint matters because the
+  // bare /api/health URL circulated as the advertised status endpoint before
+  // #4856 repointed the api-catalog/Link headers at ?compact=1 — stale
+  // consumers landing here must learn the public form instead of dead-ending.
+  const req = new Request('https://api.worldmonitor.app/api/health');
+  const res = await handler(req);
+  assert.equal(res.status, 401);
+  const challenge = res.headers.get('WWW-Authenticate');
+  assert.ok(challenge, '401 must carry a WWW-Authenticate challenge (RFC 7235 §3.1)');
+  assert.match(challenge, /resource_metadata="https:\/\/www\.worldmonitor\.app\/\.well-known\/oauth-protected-resource"/);
+  const body = await res.json();
+  assert.match(body.hint, /\/api\/health\?compact=1/);
+});
+
 test('health history requires an operator API key before Redis is queried', async () => {
   const req = new Request('https://api.worldmonitor.app/api/health?history=1');
   const res = await handler(req);

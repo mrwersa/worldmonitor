@@ -788,7 +788,23 @@ export default async function handler(req, ctx) {
       const error = keyCheck.error === USER_API_KEY_GATEWAY_VALIDATION_ERROR
         ? 'Invalid API key'
         : keyCheck.error;
-      return jsonResponse({ error }, 401, headers);
+      // RFC 7235 §3.1 requires WWW-Authenticate on every 401; resource_metadata
+      // (RFC 9728 §5.1) lets agents discover how to obtain credentials. The
+      // hint exists because this URL is what old copies of the api-catalog
+      // linkset advertised as the public status endpoint (#4856) — a keyless
+      // caller landing here should learn the public form, not dead-end.
+      return jsonResponse(
+        {
+          error,
+          hint: 'Detailed health requires an operator/enterprise API key. Public status: /api/health?compact=1',
+        },
+        401,
+        {
+          ...headers,
+          'WWW-Authenticate':
+            'Bearer resource_metadata="https://www.worldmonitor.app/.well-known/oauth-protected-resource"',
+        }
+      );
     }
   }
 

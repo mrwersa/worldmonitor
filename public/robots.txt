@@ -14,6 +14,7 @@ Allow: /
 Allow: /api/story
 Allow: /api/og-story
 Allow: /api/llms.txt
+Allow: /api/product-catalog
 Disallow: /api/
 Disallow: /tests/
 

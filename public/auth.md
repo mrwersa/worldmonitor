@@ -5,6 +5,12 @@ How agents authenticate with the WorldMonitor API and MCP server
 <https://workos.com/auth-md>. Discovery is open; data calls need a bearer token
 or API key.
 
+**Before anything else — send a descriptive `User-Agent`** (e.g.
+`mytool/1.0 (+https://yoursite.example)`). Default HTTP-library UAs (`curl/*`,
+`python-requests/*`, empty/short strings) may be challenged with an HTML 403 by
+the edge firewall before your request reaches the API — a 403 does not mean the
+endpoint is missing or your credentials are wrong.
+
 ## Discover
 
 Learn the auth requirements from one unauthenticated request, then follow the

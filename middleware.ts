@@ -32,12 +32,17 @@ const LEGACY_DASHBOARD_ROOT_QUERY_KEYS = ['lat', 'lon', 'zoom', 'view', 'timeRan
 //   public/api/llms.txt). It MUST bypass the bot gate — AI crawlers (ClaudeBot,
 //   GPTBot, PerplexityBot, CCBot, …) are the entire audience for an llms.txt,
 //   yet every one of those UAs matches BOT_UA and would otherwise 403.
+// - /api/product-catalog: public read-only pricing catalog (Redis-cached,
+//   keyless, advertised as service-meta in /.well-known/api-catalog). Agents
+//   evaluating the product are a primary audience; an agent-journey run (#4854)
+//   got 403 here and concluded the endpoint didn't exist.
 const PUBLIC_API_PATHS = new Set([
   '/api/version',
   '/api/health',
   '/api/seed-contract-probe',
   '/api/internal/brief-why-matters',
   '/api/llms.txt',
+  '/api/product-catalog',
 ]);
 
 const SOCIAL_IMAGE_UA =

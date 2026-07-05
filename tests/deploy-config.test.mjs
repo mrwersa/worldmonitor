@@ -1165,16 +1165,56 @@ describe('agent readiness: api-catalog + openapi build', () => {
     assert.ok(apiEntry, 'linkset must contain a context object anchored at https://api.worldmonitor.app/');
   });
 
-  it('status href points at /api/health (SPA lives at /health — would 200 HTML and look healthy)', () => {
+  it('status href points at the KEYLESS compact form of /api/health', () => {
+    // Two drift classes guarded here:
+    //   (1) the SPA lives at /health — a bare-host href would 200 HTML and
+    //       look healthy;
+    //   (2) #4715 gated detailed /api/health behind an operator key, so the
+    //       bare endpoint 401s keyless callers. An advertised status URL must
+    //       return 2xx WITHOUT credentials — that is ?compact=1 (#4856; an
+    //       agent-journey run read the stale bare-URL advertisement, got 401,
+    //       and flagged the whole status surface as broken).
     const statusHref = apiEntry.status[0].href;
     assert.ok(
       statusHref.startsWith('https://api.worldmonitor.app'),
       `status href must be on api.worldmonitor.app, got: ${statusHref}`
     );
-    assert.ok(
-      statusHref.endsWith('/api/health'),
-      `status href must end with /api/health (real JSON endpoint), got: ${statusHref}`
+    assert.equal(
+      statusHref,
+      'https://api.worldmonitor.app/api/health?compact=1',
+      'status href must be the keyless compact health form'
     );
+  });
+
+  it('every vercel.json Link rel="status" advertisement uses the keyless compact form', () => {
+    // Same #4715→#4856 drift class as above, for the Link-header copies: an
+    // auth-gating change on /api/health must not silently strand the
+    // machine-readable status advertisements on a URL that 401s keyless.
+    const vercelRaw = readFileSync(resolve(__dirname, '../vercel.json'), 'utf-8');
+    const statusLinks = vercelRaw.match(/<[^>]*>;\s*rel=\\"status\\"/g) ?? [];
+    assert.ok(statusLinks.length > 0, 'expected at least one Link rel="status" advertisement in vercel.json');
+    for (const link of statusLinks) {
+      assert.ok(
+        link.startsWith('</api/health?compact=1>'),
+        `Link rel="status" must point at /api/health?compact=1 (keyless), got: ${link}`
+      );
+    }
+  });
+
+  it('service-meta advertises the machine-readable pricing + support surfaces', () => {
+    // Pricing/support were previously discoverable ONLY via llms.txt; agents
+    // entering through the Link-header → api-catalog chain never saw them and
+    // fell back to slug-guessing (#4854, #4857). RFC 9727 allows arbitrary
+    // link relations on a context object; service-meta is the metadata slot.
+    const meta = apiEntry['service-meta'];
+    assert.ok(Array.isArray(meta) && meta.length > 0, 'api context must carry service-meta entries');
+    const hrefs = meta.map((entry) => entry.href);
+    assert.ok(hrefs.includes('https://worldmonitor.app/pricing.md'), 'service-meta must advertise pricing.md');
+    assert.ok(
+      hrefs.includes('https://www.worldmonitor.app/api/product-catalog'),
+      'service-meta must advertise the live product-catalog JSON endpoint'
+    );
+    assert.ok(hrefs.includes('https://worldmonitor.app/support.md'), 'service-meta must advertise support.md');
   });
 
   it('service-desc points at /openapi.yaml with the OpenAPI media type', () => {

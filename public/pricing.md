@@ -1,8 +1,10 @@
 # Pricing - World Monitor
 
-Last updated: June 13, 2026
+Last updated: July 5, 2026
 
 World Monitor has a free public dashboard and paid tiers for analyst workflows, API access and organization deployments.
+
+Live tier/price/product-ID data (JSON): `GET https://www.worldmonitor.app/api/product-catalog` — public, no key required. Send a descriptive `User-Agent` (for example `mytool/1.0 (+https://yoursite.example)`); default HTTP-library user agents may be challenged by the edge firewall.
 
 ## Free
 
@@ -38,6 +40,12 @@ World Monitor has a free public dashboard and paid tiers for analyst workflows, 
 - Includes: Everything in Pro and API, team workspaces, SSO/MFA/RBAC, dedicated support, white-label and embeddable panels, Android TV app, SIEM/connectors, bulk export and managed deployment options
 - Deployment options: Cloud, dedicated cloud tenant, on-premises or air-gapped
 - Security: AES-256 encrypted notification channels, audit trail, private MCP options and organization controls
+
+## Limits & Overage
+
+- Rate limits are hard limits by default: exceeding a plan quota returns HTTP `429` with a `Retry-After` header and `X-RateLimit-*` headers on API responses. Usage above the quota is rejected — never silently charged; if opt-in metered overage is introduced for API plans it will be documented here first.
+- Per-endpoint request budgets are documented at https://www.worldmonitor.app/docs/usage-rate-limits (also fetchable as markdown at https://www.worldmonitor.app/docs/usage-rate-limits.md).
+- Need a higher limit? Upgrade at https://worldmonitor.app/pro or contact enterprise@worldmonitor.app for custom quotas.
 
 ## Machine-Readable Summary
 
