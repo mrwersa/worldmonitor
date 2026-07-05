@@ -8,6 +8,7 @@ import { describe, it, afterEach } from 'node:test';
 import {
   STORY_SIMILARITY_THRESHOLD,
   normalizeStoryText,
+  stripAttributionSuffix,
   candidateTokens,
   storyVector,
   cosineSimilarity,
@@ -35,6 +36,12 @@ const POSITIVE_PAIRS = [
   ['Nigeria fuel subsidy protests spread to Lagos as unions join', 'Nigeria fuel subsidy protests spread to Lagos'],
   ['Turkey hikes interest rates to 50% in surprise move', 'Turkey hikes rates to 50% in surprise move'],
   ['China exports fall 7.5% in June, worse than expected', 'Chinese exports fell 7.5% in June, worse than expected'],
+  // Severe RSS truncation (>=50% token drop) — the containment-rescue
+  // class the old word-overlap dedup metric guaranteed (#4924 review).
+  ['Nigeria fuel subsidy protests spread to Lagos as unions join nationwide strike over cost of living', 'Nigeria fuel subsidy protests spread to Lagos'],
+  ['Turkey central bank hikes interest rates to 50% in surprise move to combat runaway inflation pressures', 'Turkey central bank hikes interest rates'],
+  // Source-attribution suffix must not shift identity (#4924 cross-model).
+  ['Iran threatens to close Strait of Hormuz - Reuters', 'Iran threatens to close Strait of Hormuz'],
 ];
 
 // NEGATIVES: same-topic-DIFFERENT-event pairs that must stay apart —
@@ -49,6 +56,10 @@ const NEGATIVE_PAIRS = [
   ['Nigeria fuel subsidy protests spread to Lagos', 'Kenya tax protests spread to Nairobi'],
   ['US imposes new sanctions on Iranian oil exports', 'US lifts sanctions on Venezuelan oil exports'],
   ['Israel strikes Hezbollah targets in southern Lebanon', 'Hezbollah strikes Israeli positions in northern Israel'],
+  // Shared publisher suffix must NOT pull distinct stories together —
+  // pre-fix, the entity-boosted "Reuters" token added shared mass to
+  // every same-wrapper pair (#4924 cross-model finding).
+  ['Apple unveils new AI features at WWDC keynote - Reuters', 'Google unveils new AI features at I/O keynote - Reuters'],
 ];
 
 // KNOWN LIMIT (documented, deliberately NOT asserted as separable): two
@@ -248,5 +259,131 @@ describe('deduplicateHeadlines (shared-similarity rewrite)', () => {
   it('keeps unvectorizable headlines rather than dropping them', () => {
     const result = deduplicateHeadlines(['', '¡!', 'Fed holds rates steady']);
     assert.equal(result.length, 3);
+  });
+});
+
+
+// ── #4924 review-round regression tests ────────────────────────────────────
+
+describe('canonical identity stability (#4924 review)', () => {
+  it('REGRESSION: a later-published wording that sorts lexicographically earlier must NOT steal the canonical', async () => {
+    // Reliability P1 + learnings: pre-fix, canonical = lexicographic-min
+    // member of the CURRENT batch, so "Ahead of talks, Iran threatens…"
+    // (sorts before "Iran threatens…") joining a live cluster flipped the
+    // story:track id, resetting mentionCount/firstSeen and re-firing
+    // BREAKING mid-lifecycle.
+    const a = { title: 'Iran threatens to close Strait of Hormuz', source: 'Reuters', publishedAt: 100 };
+    const b = { title: 'Iran threatens to close Strait of Hormuz — live updates', source: 'BBC', publishedAt: 200 };
+    const build1 = await assignStoryIdentity([a, b], normalizeTitle, sha256Hex);
+
+    const c = { title: 'Ahead of talks, Iran threatens to close Strait of Hormuz', source: 'AFP', publishedAt: 300 };
+    const build2 = await assignStoryIdentity([a, b, c], normalizeTitle, sha256Hex);
+
+    assert.ok(normalizeTitle(c.title) < normalizeTitle(a.title), 'fixture: C must sort before A for the test to bite');
+    assert.equal(build2.get(a).titleHash, build1.get(a).titleHash, 'canonical must stay anchored on the earliest-published member');
+    assert.equal(build2.get(c).titleHash, build1.get(a).titleHash, 'new wording adopts the existing identity');
+    assert.equal(build2.get(a).corroborationCount, 3);
+  });
+
+  it('missing publishedAt falls back to lexicographic-min (deterministic)', async () => {
+    const a = { title: 'Iran threatens to close Strait of Hormuz — live updates', source: 'BBC' };
+    const b = { title: 'Iran threatens to close Strait of Hormuz', source: 'Reuters' };
+    const assignment = await assignStoryIdentity([a, b], normalizeTitle, sha256Hex);
+    assert.equal(assignment.get(a).titleHash, await sha256Hex(normalizeTitle(b.title)));
+  });
+
+  it('cluster membership is input-order independent (union-find, not greedy seed)', () => {
+    // Bridge case: A~B and B~C above threshold, A~C possibly below —
+    // greedy first-seed clustering could split this differently
+    // depending on which item arrived first; connected components
+    // cannot.
+    const texts = [
+      'Turkey central bank hikes interest rates to 50% in surprise move',
+      'Turkey central bank hikes interest rates to 50%',
+      'Turkey central bank hikes rates',
+      'Kenya tax protests spread to Nairobi',
+    ];
+    const perms = [
+      [0, 1, 2, 3], [3, 2, 1, 0], [1, 3, 0, 2], [2, 0, 3, 1],
+    ];
+    const canonicalSizes = perms.map((perm) => {
+      const clusters = clusterTexts(perm.map((i) => texts[i]));
+      return clusters.map((c) => c.length).sort().join(',');
+    });
+    assert.ok(canonicalSizes.every((sig) => sig === canonicalSizes[0]),
+      `cluster size signature must be order-invariant, got: ${canonicalSizes.join(' | ')}`);
+  });
+});
+
+describe('degenerate titles (#4924 review)', () => {
+  it('emoji/punctuation-only titles get per-item sentinel identities, not one shared phantom track', async () => {
+    const items = [
+      { title: '🔥🔥🔥', source: 'FeedA' },
+      { title: '!!!', source: 'FeedB' },
+      { title: '🔥🔥🔥', source: 'FeedC' },
+    ];
+    const assignment = await assignStoryIdentity(items, normalizeTitle, sha256Hex);
+    const hashes = items.map((i) => assignment.get(i).titleHash);
+    assert.equal(new Set(hashes).size, 3, 'each contentless item gets its own identity');
+    for (const item of items) {
+      assert.equal(assignment.get(item).corroborationCount, 1, 'contentless titles never corroborate each other');
+    }
+  });
+});
+
+describe('attribution suffixes and length clamp (#4924 review)', () => {
+  it('stripAttributionSuffix removes trailing publisher attributions', () => {
+    assert.equal(stripAttributionSuffix('Iran threatens Hormuz - Reuters'), 'Iran threatens Hormuz');
+    assert.equal(stripAttributionSuffix('Iran threatens Hormuz - example.com'), 'Iran threatens Hormuz');
+    assert.equal(stripAttributionSuffix('Iran-Iraq talks resume'), 'Iran-Iraq talks resume', 'mid-title hyphens untouched');
+  });
+
+  it('a pathologically long title does not change identity behavior (clamped, still vectorizes)', () => {
+    const base = 'Iran threatens to close Strait of Hormuz';
+    const long = base + ' ' + 'filler'.repeat(2000);
+    assert.ok(storyVector(long), 'clamped long title still vectorizes');
+    assert.ok(storySimilarity(base, base + ' amid rising tension') >= STORY_SIMILARITY_THRESHOLD);
+  });
+});
+
+// ── list-feed-digest integration wiring (source-textual, mirrors the
+// digest-buildDigest-*-passthrough test pattern) ───────────────────────────
+
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+describe('list-feed-digest story-identity wiring (#4924 review)', () => {
+  const digestSrc = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../server/worldmonitor/news/v1/list-feed-digest.ts'),
+    'utf-8',
+  );
+
+  it('assigns story identity before AI-cache enrichment and scoring', () => {
+    const assignAt = digestSrc.indexOf('await assignStoryIdentity(allItems');
+    const enrichAt = digestSrc.indexOf('await enrichWithAiCache(allItems)');
+    assert.ok(assignAt > -1 && enrichAt > -1);
+    assert.ok(assignAt < enrichAt, 'identity must be assigned before enrichment/scoring consumes it');
+  });
+
+  it('both corroboration consumers read the cluster-wide count from the item', () => {
+    assert.match(digestSrc, /Math\.max\(item\.corroborationCount, item\.entityCorroborationCount\)/,
+      'importance scoring must consume the cluster-wide corroboration');
+    assert.match(digestSrc, /const sourceCount = item\.corroborationCount \?\? 1;/,
+      'per-category slice must consume the cluster-wide corroboration');
+  });
+
+  it('mentionCount increments once per unique hash per cycle, not once per member', () => {
+    const hincrbyAt = digestSrc.indexOf("['HINCRBY', trackKey, 'mentionCount', '1']");
+    const guardAt = digestSrc.indexOf('if (!writtenHashes.has(hash))');
+    assert.ok(guardAt > -1, 'unique-hash guard must exist');
+    assert.ok(hincrbyAt > guardAt, 'HINCRBY must sit inside the once-per-hash guard');
+    // Per-member set-shaped writes stay outside the guard.
+    const saddAt = digestSrc.indexOf("['SADD', sourcesKey, item.source]");
+    assert.ok(saddAt > hincrbyAt, 'per-member SADD stays outside the once-per-hash block');
+  });
+
+  it('coverage-miss fallback is observable, not silent', () => {
+    assert.match(digestSrc, /story-identity coverage miss/, 'fallback branch must log');
   });
 });

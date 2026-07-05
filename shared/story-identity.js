@@ -107,7 +107,8 @@ function isNonAscii(token) {
  */
 export function candidateTokens(text) {
   const out = new Set();
-  for (const tok of normalizeStoryText(text).split(' ')) {
+  const clamped = stripAttributionSuffix(text).slice(0, MAX_IDENTITY_CHARS);
+  for (const tok of normalizeStoryText(clamped).split(' ')) {
     if (!tok) continue;
     if (isNonAscii(tok)) {
       out.add(tok);
@@ -116,6 +117,28 @@ export function candidateTokens(text) {
       out.add(tok);
     }
   }
+  return out;
+}
+
+// Trailing source-attribution suffixes ("… - Reuters", "… - example.com")
+// must not enter the vector: Google-News wrapper titles carry them on
+// EVERY item, so the publisher token (capitalized → entity-boosted ×3)
+// adds shared mass across DISTINCT same-publisher stories and pulls them
+// toward a false merge (cross-model review finding, PR #4924). Mirrors
+// list-feed-digest's normalizeTitle suffix rules, but case-preserving.
+const ATTRIBUTION_SUFFIX_RES = [
+  /\s*[-\u2013\u2014|]\s*[\w\s.]+\.(?:com|org|net|co\.uk)\s*$/i,
+  /\s*[-\u2013\u2014|]\s*(?:reuters|ap news|bbc|cnn|al jazeera|france 24|dw news|pbs newshour|cbs news|nbc|abc|associated press|the guardian|nos nieuws|tagesschau|cnbc|the national)\s*$/i,
+];
+
+// Unbounded feed titles feed char-4gram loops inside a 25s serverless
+// budget; clamp AFTER suffix stripping. 300 chars ≈ 3× a long headline.
+const MAX_IDENTITY_CHARS = 300;
+
+/** @param {string} text @returns {string} */
+export function stripAttributionSuffix(text) {
+  let out = text || '';
+  for (const re of ATTRIBUTION_SUFFIX_RES) out = out.replace(re, '');
   return out;
 }
 
@@ -128,7 +151,8 @@ export function candidateTokens(text) {
  */
 function contentTokens(text) {
   const kept = [];
-  for (const raw of (text || '').split(/\s+/)) {
+  const clamped = stripAttributionSuffix(text).slice(0, MAX_IDENTITY_CHARS);
+  for (const raw of clamped.split(/\s+/)) {
     // Strip everything that is not a Unicode letter/number, keeping the
     // original case so the entity heuristic can read it.
     const clean = raw.replace(/[^\p{L}\p{N}]/gu, '');
@@ -215,7 +239,13 @@ function lexicalStoryVector(text) {
   const un = l2normalize(u);
   const bn = l2normalize(b);
   if (!un || !bn) return null;
-  return { u: un, b: bn };
+  // Token set rides along for the containment rescue in
+  // cosineSimilarity — severe RSS truncation (a headline cut to ~40% of
+  // its tokens) drops the cosine below threshold even though the short
+  // form is a strict subset of the long form. The old word-overlap
+  // dedup metric (|∩|/min) handled exactly this class; keep that
+  // guarantee via token containment.
+  return { u: un, b: bn, t: new Set(tokens.map((entry) => entry.tok)) };
 }
 
 /** Active vectorizer — swappable for a semantic embedding provider. */
@@ -259,9 +289,33 @@ function dot(a, b) {
  * @param {{ u: Float64Array; b: Float64Array } | null} b
  * @returns {number}
  */
+// Containment rescue floor: a title whose content tokens are ≥90%
+// contained in the other's (with at least 4 tokens on the smaller side,
+// so fragments like "Iran" can't rescue) IS the same story — the
+// truncated-wire-copy class the old |∩|/min dedup metric guaranteed.
+const CONTAINMENT_RESCUE_MIN_TOKENS = 4;
+const CONTAINMENT_RESCUE_RATIO = 0.9;
+const CONTAINMENT_RESCUE_SCORE = 0.9;
+
 export function cosineSimilarity(a, b) {
   if (!a || !b) return 0;
-  return Math.min(dot(a.u, b.u), dot(a.b, b.b));
+  const score = Math.min(dot(a.u, b.u), dot(a.b, b.b));
+  // Rescue only applies to lexical vectors carrying token sets — a
+  // semantic provider's vectors skip it (semantic cosine already
+  // handles truncation).
+  if (score < CONTAINMENT_RESCUE_SCORE && a.t && b.t) {
+    const [small, large] = a.t.size <= b.t.size ? [a.t, b.t] : [b.t, a.t];
+    if (small.size >= CONTAINMENT_RESCUE_MIN_TOKENS) {
+      let shared = 0;
+      for (const tok of small) {
+        if (large.has(tok)) shared++;
+      }
+      if (shared / small.size >= CONTAINMENT_RESCUE_RATIO) {
+        return CONTAINMENT_RESCUE_SCORE;
+      }
+    }
+  }
+  return score;
 }
 
 /**
@@ -282,15 +336,31 @@ export function isSameStory(textA, textB, threshold = STORY_SIMILARITY_THRESHOLD
   return storySimilarity(textA, textB) >= threshold;
 }
 
+// A token shared by more than this many titles carries no clustering
+// signal (it is the batch's "the") but drives O(bucket²) pair scoring —
+// an adversarial or organic hot-entity spike (thousands of titles naming
+// one entity) would otherwise burn seconds of CPU inside the digest
+// handler's 25s budget. Pairs joined ONLY by ultra-hot tokens almost
+// always share a rarer token too.
+const MAX_CANDIDATE_BUCKET = 250;
+
 /**
- * Greedy single-pass clustering (the same shape _clustering.mjs used, so
- * consumer behavior stays predictable): earlier texts seed clusters,
- * later texts join the first seed within threshold. Inverted-index
- * candidate generation keeps this near-linear for feed-sized batches.
- * Deterministic for a given input order.
+ * Cluster texts into same-story groups: connected components over the
+ * "similarity ≥ threshold" edge set (union-find), with inverted-index
+ * candidate generation so only pairs sharing ≥1 token are scored.
+ *
+ * Connected components — NOT the greedy first-seed pass the legacy
+ * _clustering.mjs used — because component membership is independent of
+ * input order: feed arrival order varies run to run, and under greedy
+ * assignment a chain (A~B, B~C, A≁C) could land C in or out of A's
+ * cluster depending on which seeded first, churning the canonical
+ * story:track identity downstream (cross-model review finding,
+ * PR #4924). Transitive chains merge by design; the threshold's
+ * precision bounds chain length in practice.
  * @param {string[]} texts
  * @param {{ threshold?: number }} [opts]
- * @returns {number[][]} clusters of indices into `texts`
+ * @returns {number[][]} clusters of indices into `texts`, ordered by
+ *   smallest member index; members ascending
  */
 export function clusterTexts(texts, opts = {}) {
   const threshold = typeof opts.threshold === 'number' ? opts.threshold : STORY_SIMILARITY_THRESHOLD;
@@ -306,30 +376,51 @@ export function clusterTexts(texts, opts = {}) {
     }
   }
 
-  const clusters = [];
-  const assigned = new Set();
-  for (let i = 0; i < texts.length; i++) {
-    if (assigned.has(i)) continue;
-    const cluster = [i];
-    assigned.add(i);
+  const parent = new Array(texts.length);
+  for (let i = 0; i < texts.length; i++) parent[i] = i;
+  const find = (x) => {
+    let root = x;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[x] !== root) {
+      const next = parent[x];
+      parent[x] = root;
+      x = next;
+    }
+    return root;
+  };
+  const union = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra === rb) return;
+    // Deterministic: smaller index becomes the root.
+    if (ra < rb) parent[rb] = ra;
+    else parent[ra] = rb;
+  };
 
+  for (let i = 0; i < texts.length; i++) {
+    if (!vectors[i]) continue;
     const candidates = new Set();
     for (const token of tokenSets[i]) {
       const bucket = invertedIndex.get(token);
-      if (!bucket) continue;
+      if (!bucket || bucket.length > MAX_CANDIDATE_BUCKET) continue;
       for (const idx of bucket) {
         if (idx > i) candidates.add(idx);
       }
     }
-
-    for (const j of Array.from(candidates).sort((a, b) => a - b)) {
-      if (assigned.has(j)) continue;
-      if (cosineSimilarity(vectors[i], vectors[j]) >= threshold) {
-        cluster.push(j);
-        assigned.add(j);
-      }
+    for (const j of candidates) {
+      if (find(i) === find(j)) continue;
+      if (cosineSimilarity(vectors[i], vectors[j]) >= threshold) union(i, j);
     }
-    clusters.push(cluster);
   }
-  return clusters;
+
+  const byRoot = new Map();
+  for (let i = 0; i < texts.length; i++) {
+    const root = find(i);
+    const members = byRoot.get(root);
+    if (members) members.push(i);
+    else byRoot.set(root, [i]);
+  }
+  return Array.from(byRoot.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, members]) => members);
 }

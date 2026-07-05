@@ -1115,6 +1115,34 @@ async function writeStoryTracking(items: ParsedItem[], variant: string, lang: st
   const now = Date.now();
   const accKey = DIGEST_ACCUMULATOR_KEY(variant, lang);
 
+  // #4919/#4924: with fuzzy story identity, N same-cycle wording variants
+  // share one titleHash. Mutable per-story writes (mentionCount HINCRBY,
+  // HSET representative fields) must run ONCE per unique hash per cycle —
+  // per-item they would inflate mentionCount by N per cycle (a 6-variant
+  // story would skip DEVELOPING straight to SUSTAINED, since the read
+  // path treats mentionCount as +1/cycle) and let whichever member
+  // iterated last overwrite the representative fields nondeterministically.
+  // Representative = highest importanceScore, tie-break newest publishedAt
+  // then title — deterministic for a given batch. Per-MEMBER writes that
+  // are set-shaped stay per item: SADD source (distinct-source set is the
+  // point of corroboration) and ZADD peak GT (max is idempotent).
+  const representativeByHash = new Map<string, ParsedItem>();
+  for (let i = 0; i < items.length; i++) {
+    const hash = hashes[i]!;
+    const item = items[i]!;
+    const current = representativeByHash.get(hash);
+    if (
+      !current
+      || item.importanceScore > current.importanceScore
+      || (item.importanceScore === current.importanceScore && item.publishedAt > current.publishedAt)
+      || (item.importanceScore === current.importanceScore && item.publishedAt === current.publishedAt
+        && item.title < current.title)
+    ) {
+      representativeByHash.set(hash, item);
+    }
+  }
+
+  const writtenHashes = new Set<string>();
   for (let batchStart = 0; batchStart < items.length; batchStart += STORY_BATCH_SIZE) {
     const batch = items.slice(batchStart, batchStart + STORY_BATCH_SIZE);
     const commands: Array<Array<string | number>> = [];
@@ -1129,18 +1157,24 @@ async function writeStoryTracking(items: ParsedItem[], variant: string, lang: st
       const nowStr = String(now);
       const ttl = STORY_TTL;
 
-      const hsetFields = buildStoryTrackHsetFields(item, nowStr, score);
+      if (!writtenHashes.has(hash)) {
+        writtenHashes.add(hash);
+        const representative = representativeByHash.get(hash) ?? item;
+        const hsetFields = buildStoryTrackHsetFields(representative, nowStr, representative.importanceScore);
+        commands.push(
+          ['HINCRBY', trackKey, 'mentionCount', '1'],
+          ['HSET', trackKey, ...hsetFields],
+          ['HSETNX', trackKey, 'firstSeen', nowStr],
+          ['EXPIRE', trackKey, ttl],
+          ['EXPIRE', sourcesKey, ttl],
+          ['EXPIRE', peakKey, ttl],
+          ['ZADD', accKey, nowStr, hash],
+        );
+      }
 
       commands.push(
-        ['HINCRBY', trackKey, 'mentionCount', '1'],
-        ['HSET', trackKey, ...hsetFields],
-        ['HSETNX', trackKey, 'firstSeen', nowStr],
         ['ZADD', peakKey, 'GT', score, 'peak'],
         ['SADD', sourcesKey, item.source],
-        ['EXPIRE', trackKey, ttl],
-        ['EXPIRE', sourcesKey, ttl],
-        ['EXPIRE', peakKey, ttl],
-        ['ZADD', accKey, nowStr, hash],
       );
     }
 
@@ -1262,7 +1296,11 @@ async function buildDigest(variant: string, lang: string): Promise<ListFeedDiges
         item.corroborationCount = identity.corroborationCount;
       } else {
         // Defensive: assignStoryIdentity covers every input by
-        // construction; degrade to the pre-#4919 exact identity if not.
+        // construction; degrade to the pre-#4919 exact identity if not —
+        // and say so, or a future coverage-invariant break is invisible.
+        console.warn(
+          `[digest] story-identity coverage miss — exact-hash fallback for "${item.title.slice(0, 60)}"`,
+        );
         item.titleHash = await sha256Hex(normalizeTitle(item.title));
         item.corroborationCount = 1;
       }

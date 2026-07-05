@@ -2,7 +2,7 @@
 
 export function deduplicateHeadlines(headlines: string[]): string[];
 
-export function assignStoryIdentity<T extends { title: string; source: string }>(
+export function assignStoryIdentity<T extends { title: string; source: string; publishedAt?: number }>(
   items: T[],
   normalizeTitle: (title: string) => string,
   sha256Hex: (text: string) => Promise<string>,

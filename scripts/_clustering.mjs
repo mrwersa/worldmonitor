@@ -6,12 +6,7 @@ import { createRequire } from 'node:module';
 // the JSON requires below). The local Jaccard-0.5 matcher this file
 // carried was one of three inconsistent "same story?" answers in the
 // codebase; all three now share ONE definition and threshold.
-import {
-  storyVector,
-  cosineSimilarity,
-  candidateTokens,
-  STORY_SIMILARITY_THRESHOLD,
-} from './shared/story-identity.js';
+import { clusterTexts } from './shared/story-identity.js';
 
 const require = createRequire(import.meta.url);
 const SOURCE_TIERS = require('./shared/source-tiers.json');
@@ -125,47 +120,12 @@ function containsKeywordToken(text, kw) {
 export function clusterItems(items) {
   if (items.length === 0) return [];
 
-  const vectors = items.map(item => storyVector(item.title || ''));
-  const tokenList = items.map(item => candidateTokens(item.title || ''));
-
-  const invertedIndex = new Map();
-  for (let i = 0; i < tokenList.length; i++) {
-    for (const token of tokenList[i]) {
-      const bucket = invertedIndex.get(token);
-      if (bucket) bucket.push(i);
-      else invertedIndex.set(token, [i]);
-    }
-  }
-
-  const clusters = [];
-  const assigned = new Set();
-
-  for (let i = 0; i < items.length; i++) {
-    if (assigned.has(i)) continue;
-
-    const cluster = [i];
-    assigned.add(i);
-    const tokensI = tokenList[i];
-
-    const candidates = new Set();
-    for (const token of tokensI) {
-      const bucket = invertedIndex.get(token);
-      if (!bucket) continue;
-      for (const idx of bucket) {
-        if (idx > i) candidates.add(idx);
-      }
-    }
-
-    for (const j of Array.from(candidates).sort((a, b) => a - b)) {
-      if (assigned.has(j)) continue;
-      if (cosineSimilarity(vectors[i], vectors[j]) >= STORY_SIMILARITY_THRESHOLD) {
-        cluster.push(j);
-        assigned.add(j);
-      }
-    }
-
-    clusters.push(cluster.map(idx => items[idx]));
-  }
+  // #4924 review (maintainability P1): delegate the clustering ALGORITHM
+  // to the shared module too, not just the similarity function — a local
+  // copy of the loop would let clustering semantics drift apart again,
+  // one layer above the drift this PR removed.
+  const clusters = clusterTexts(items.map(item => item.title || ''))
+    .map(indices => indices.map(idx => items[idx]));
 
   return clusters.map(group => {
     const sorted = [...group].sort((a, b) => {

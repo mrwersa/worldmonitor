@@ -10,11 +10,15 @@
 export interface StoryVector {
   u: Float64Array;
   b: Float64Array;
+  /** Content-token set (lexical vectors only) — drives the containment
+   * rescue for truncated headlines; absent on semantic-provider vectors. */
+  t?: Set<string>;
 }
 
 export const STORY_SIMILARITY_THRESHOLD: number;
 
 export function normalizeStoryText(text: string): string;
+export function stripAttributionSuffix(text: string): string;
 export function candidateTokens(text: string): Set<string>;
 export function setStoryVectorProvider(
   provider: ((text: string) => StoryVector | null) | null,
