@@ -270,7 +270,9 @@ export default async function handler(req) {
       const result = { tiers, fetchedAt: now, cachedUntil: now + CACHE_TTL * 1000, priceSource };
       // Don't write to Redis — let the Railway seed own that key with its longer TTL.
       // Just return the result with short cache so the next Railway cycle repopulates properly.
-      return json(result, 200, cors, 'public, max-age=60, s-maxage=60', 'dodo');
+      // Header must carry the SAME source as the body: a partial Dodo read
+      // stamped 'dodo' here made probes read a degraded response as fully live.
+      return json(result, 200, cors, 'public, max-age=60, s-maxage=60', priceSource);
     }
   }
 

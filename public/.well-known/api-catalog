@@ -47,6 +47,11 @@
           "title": "Live product catalog (tiers, prices, product IDs)"
         },
         {
+          "href": "https://www.worldmonitor.app/docs/openapi/CommerceService.openapi.yaml",
+          "type": "application/vnd.oai.openapi",
+          "title": "Commerce/pricing endpoints OpenAPI (separate from the root bundle)"
+        },
+        {
           "href": "https://worldmonitor.app/support.md",
           "type": "text/markdown",
           "title": "Support channels & contact (machine-readable)"

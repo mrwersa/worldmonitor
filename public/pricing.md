@@ -27,6 +27,8 @@ Live tier/price/product-ID data (JSON): `GET https://www.worldmonitor.app/api/pr
 ## API
 
 - Price: $99.99/month
+- Annual price: $999/year
+- Annual savings: about 17 percent versus monthly billing
 - Best for: Developers and teams that want programmatic access to World Monitor intelligence data
 - Includes: REST API access, structured JSON, cache headers, OpenAPI docs, real-time data streams, webhook notifications and custom data exports
 - Starter limit: 1,000 requests/day
@@ -70,6 +72,7 @@ Live tier/price/product-ID data (JSON): `GET https://www.worldmonitor.app/api/pr
     {
       "name": "API",
       "price_usd_monthly": 99.99,
+      "price_usd_yearly": 999,
       "features": ["REST API", "1,000 requests/day starter limit", "webhooks", "structured JSON", "OpenAPI docs"]
     },
     {

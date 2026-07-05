@@ -33,10 +33,10 @@ paths:
                     description: Successful response
                     headers:
                         X-Product-Catalog-Source:
-                            description: Where the prices came from — cache, dodo, or fallback.
+                            description: Where the prices came from — cache (Redis hit), dodo (all live prices), partial (some Dodo prices missing, gaps filled from static fallback), or fallback (Dodo unreachable, all static). Matches the body's priceSource except on cache hits, where the header says cache and the body retains the priceSource stored at seed time.
                             schema:
                                 type: string
-                                enum: [cache, dodo, fallback]
+                                enum: [cache, dodo, partial, fallback]
                     content:
                         application/json:
                             schema:
@@ -59,8 +59,8 @@ paths:
                                                 highlighted:
                                                     type: boolean
                                                 price:
-                                                    type: number
-                                                    description: Flat price for non-subscription tiers (0 for Free).
+                                                    type: [number, "null"]
+                                                    description: Flat price for non-subscription tiers — 0 for Free, null for Enterprise (custom pricing). Absent on subscription tiers, which carry monthlyPrice/annualPrice instead.
                                                 period:
                                                     type: string
                                                 monthlyPrice:
@@ -79,6 +79,10 @@ paths:
                                     cachedUntil:
                                         type: integer
                                         description: Epoch ms until which the cached copy is served.
+                                    priceSource:
+                                        type: string
+                                        enum: [dodo, partial, fallback]
+                                        description: Provenance of the prices in this payload — dodo (all live), partial (some live, gaps from static fallback), fallback (all static). Cache hits retain the value stored at seed time; the X-Product-Catalog-Source header additionally reports cache.
                             example:
                                 tiers:
                                     - name: Free
@@ -97,3 +101,4 @@ paths:
                                       annualProductId: pdt_0NbttMIfjLWC10jHQWYgJ
                                 fetchedAt: 1751700000000
                                 cachedUntil: 1751703600000
+                                priceSource: dodo

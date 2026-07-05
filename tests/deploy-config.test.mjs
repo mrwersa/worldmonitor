@@ -16,7 +16,7 @@ const middlewareSource = readFileSync(resolve(__dirname, '../middleware.ts'), 'u
 const dockerfileSource = readFileSync(resolve(__dirname, '../Dockerfile'), 'utf-8');
 const dockerNginxSource = readFileSync(resolve(__dirname, '../docker/nginx.conf'), 'utf-8');
 const frontendDockerfileSource = readFileSync(resolve(__dirname, '../docker/Dockerfile'), 'utf-8');
-const SPA_HTML_CACHE_SOURCE = '/((?!api|mcp|a2a|ask|oauth|assets|blog|docs|embed|embed\\.html|favico|map-styles|data|textures|pro|sw\\.js|workbox-[a-f0-9]+\\.js|manifest\\.webmanifest|offline\\.html|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|openapi\\.yaml|openapi\\.json|auth\\.md|\\.well-known|wm-widget-sandbox\\.html|mcp-grant\\.html|mcp-grant).*)';
+const SPA_HTML_CACHE_SOURCE = '/((?!api|mcp|a2a|ask|oauth|assets|blog|docs|embed|embed\\.html|favico|map-styles|data|textures|pro|sw\\.js|workbox-[a-f0-9]+\\.js|manifest\\.webmanifest|offline\\.html|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|openapi\\.yaml|openapi\\.json|auth\\.md|pricing\\.md|support\\.md|\\.well-known|wm-widget-sandbox\\.html|mcp-grant\\.html|mcp-grant).*)';
 const GLOBAL_SECURITY_HEADER_SOURCE = '/((?!docs|embed|embed\\.html).*)';
 const APP_ROOT_HOST_PATTERN = '^(?:(?:www|tech|finance|commodity|happy|energy)\\.)?worldmonitor\\.app$';
 const GLOBAL_CSP_INLINE_SCRIPT_HTML_FILES = [
@@ -1215,6 +1215,14 @@ describe('agent readiness: api-catalog + openapi build', () => {
       'service-meta must advertise the live product-catalog JSON endpoint'
     );
     assert.ok(hrefs.includes('https://worldmonitor.app/support.md'), 'service-meta must advertise support.md');
+    // The Commerce spec lives outside the root openapi bundle (size budget,
+    // #4853) — without this link no advertised descriptor reaches it
+    // (post-#4867 review finding); Mintlify serves the raw YAML at this URL.
+    const commerceSpec = meta.find(
+      (entry) => entry.href === 'https://www.worldmonitor.app/docs/openapi/CommerceService.openapi.yaml'
+    );
+    assert.ok(commerceSpec, 'service-meta must link the Commerce OpenAPI spec');
+    assert.equal(commerceSpec.type, 'application/vnd.oai.openapi');
   });
 
   it('service-desc points at /openapi.yaml with the OpenAPI media type', () => {
@@ -1591,6 +1599,28 @@ describe('agent readiness: auth.md walkthrough', () => {
     assert.ok(catchAll.source.includes('|auth\\.md|'), 'SPA catch-all rewrite must exclude /auth.md');
     assert.ok(SPA_HTML_CACHE_SOURCE.includes('|auth\\.md|'), 'HTML cache catch-all must exclude /auth.md');
   });
+
+  // pricing.md and support.md are advertised in api-catalog service-meta and
+  // llms.txt (#4854/#4857), so they get the same three-way pinning as auth.md:
+  // explicit markdown Content-Type + CORS, catch-all exclusion (deleting or
+  // renaming the static file must 404, not silently serve the dashboard HTML
+  // misleading-200 the journey runs flagged), and this guard.
+  for (const mdPath of ['/pricing.md', '/support.md']) {
+    it(`serves ${mdPath} as markdown and keeps it off the SPA catch-all`, () => {
+      assert.equal(getHeaderValueForSource(mdPath, 'Content-Type'), 'text/markdown; charset=utf-8');
+      assert.equal(getHeaderValueForSource(mdPath, 'Access-Control-Allow-Origin'), '*');
+      const catchAll = vercelConfig.rewrites.find((r) =>
+        r.destination === DASHBOARD_HTML_DESTINATION && r.source.startsWith('/((?!')
+      );
+      const frag = `|${mdPath.slice(1).replace('.', '\\.')}|`;
+      assert.ok(catchAll.source.includes(frag), `SPA catch-all rewrite must exclude ${mdPath}`);
+      assert.ok(SPA_HTML_CACHE_SOURCE.includes(frag), `HTML cache catch-all must exclude ${mdPath}`);
+      assert.ok(
+        existsSync(resolve(__dirname, `../public${mdPath}`)),
+        `public${mdPath} must exist — it is advertised in api-catalog service-meta and llms.txt`
+      );
+    });
+  }
 });
 
 // PR history: #3204 / #3206 forced the resvg linux-x64-gnu native
