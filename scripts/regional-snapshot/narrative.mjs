@@ -23,7 +23,7 @@
 import { createHash } from 'node:crypto';
 
 import { extractFirstJsonObject, cleanJsonText } from '../_llm-json.mjs';
-import { withRetry, httpRetryError, createLlmBudgetError, isLlmBudgetError, getRedisCredentials } from '../_seed-utils.mjs';
+import { withRetry, httpRetryError, createLlmBudgetError, isLlmBudgetError } from '../_seed-utils.mjs';
 
 const CHROME_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -469,9 +469,15 @@ const NARRATIVE_CACHE_PREFIX = 'intelligence:narrative-cache:v1:';
 const NARRATIVE_CACHE_TTL_SEC = 86_400;
 
 function defaultNarrativeCache() {
+  // Read env directly — getRedisCredentials() process.exit(1)s when creds
+  // are missing, which would kill the test runner (and any credless local
+  // run) the moment the generator touches the cache. No creds → no cache,
+  // generation proceeds exactly as before this cache existed.
   return {
     async get(key) {
-      const { url, token } = getRedisCredentials();
+      const url = process.env.UPSTASH_REDIS_REST_URL;
+      const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+      if (!url || !token) return null;
       const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(3_000),
@@ -481,7 +487,9 @@ function defaultNarrativeCache() {
       return data?.result ? JSON.parse(data.result) : null;
     },
     async set(key, value, ttlSeconds) {
-      const { url, token } = getRedisCredentials();
+      const url = process.env.UPSTASH_REDIS_REST_URL;
+      const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+      if (!url || !token) return;
       await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
