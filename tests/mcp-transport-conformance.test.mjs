@@ -4,6 +4,7 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
 
@@ -372,5 +373,86 @@ describe('api/mcp.ts — transport conformance over real HTTP', () => {
     const errorBody = JSON.parse(events[0].data);
     assert.equal(errorBody.id, 21);
     assert.equal(errorBody.error?.code, -32601);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /.well-known/mcp dual-role (manifest GET + live Streamable HTTP endpoint)
+// ---------------------------------------------------------------------------
+// vercel.json rewrites /.well-known/mcp into the same handler. Agent-readiness
+// scanners (orank `mcp-server`) POST `initialize` AT the well-known URL — when
+// a static file answered that with a bodyless 405, the check scored "MCP
+// manifest found at /.well-known/mcp but protocol handshake failed" (3/6).
+// GET keeps serving the server card so manifest fetchers are unaffected, and
+// an SSE-flavored GET falls through to the endpoint's standalone-stream 405.
+describe('api/mcp.ts — /.well-known/mcp dual-role alias', () => {
+  let mcpHandler;
+  let deps;
+  let server;
+  let aliasUrl;
+  const realFetch = globalThis.fetch;
+  const cardText = readFileSync(new URL('../public/.well-known/mcp/server-card.json', import.meta.url), 'utf8');
+
+  beforeEach(async () => {
+    process.env.MCP_INTERNAL_HMAC_SECRET = HMAC_SECRET;
+    process.env.MCP_TELEMETRY = 'false';
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+
+    const mod = await import(`../api/mcp.ts?t=${Date.now()}-${Math.random()}-wk`);
+    mcpHandler = mod.mcpHandler;
+    deps = makeProDeps().deps;
+    server = await startMcpServer(mcpHandler, deps);
+    aliasUrl = server.url.replace('/mcp', '/.well-known/mcp');
+    // The handler self-fetches the static card asset; the localhost harness
+    // has no static file server, so serve the on-disk card for that one URL
+    // and delegate everything else (including the test's own requests).
+    globalThis.fetch = (input, init) => {
+      const href = typeof input === 'string' ? input : input.url ?? String(input);
+      if (href.endsWith('/.well-known/mcp/server-card.json')) {
+        return Promise.resolve(new Response(cardText, { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return realFetch(input, init);
+    };
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = realFetch;
+    if (server) await server.close();
+    Object.keys(process.env).forEach((k) => {
+      if (!(k in originalEnv)) delete process.env[k];
+    });
+    Object.assign(process.env, originalEnv);
+  });
+
+  it('plain GET serves the server card (manifest role), even with a foreign Origin', async () => {
+    const res = await fetch(aliasUrl, {
+      headers: { Accept: 'application/json', Origin: 'https://ora.ai' },
+    });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /application\/json/i);
+    const card = await res.json();
+    assert.equal(card.serverUrl, 'https://worldmonitor.app/mcp');
+    assert.equal(card.remotes?.[0]?.url, 'https://worldmonitor.app/mcp');
+  });
+
+  it('POST initialize completes the live Streamable HTTP handshake at the well-known URL', async () => {
+    const res = await fetch(aliasUrl, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(initBody(31)),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result?.serverInfo?.name, 'worldmonitor');
+    assert.ok(res.headers.get('mcp-session-id'), 'well-known endpoint role must mint a session like /mcp');
+  });
+
+  it('GET asking for text/event-stream falls through to the standalone-stream 405', async () => {
+    const res = await fetch(aliasUrl, {
+      headers: { Accept: 'text/event-stream' },
+    });
+    assert.equal(res.status, 405);
+    assert.match(res.headers.get('allow') ?? '', /\bPOST\b/);
   });
 });

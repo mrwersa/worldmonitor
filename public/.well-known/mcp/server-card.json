@@ -15,6 +15,9 @@
     "type": "streamableHttp",
     "endpoint": "https://worldmonitor.app/mcp"
   },
+  "remotes": [
+    { "type": "streamable-http", "url": "https://worldmonitor.app/mcp" }
+  ],
   "capabilities": {
     "tools": true,
     "logging": true,

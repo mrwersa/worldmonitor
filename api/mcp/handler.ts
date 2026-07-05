@@ -283,6 +283,44 @@ function handleSseReplay(req: Request, corsHeaders: Record<string, string>): Res
 }
 
 // ---------------------------------------------------------------------------
+// /.well-known/mcp dual-role support
+// ---------------------------------------------------------------------------
+// vercel.json rewrites /.well-known/mcp into this handler so ONE URL is both
+// the discovery manifest (plain GET → static server card) and a live
+// Streamable HTTP endpoint (POST initialize etc.). Agent-readiness scanners
+// (orank `mcp-server`) POST `initialize` AT the well-known URL; when a static
+// file answered that with a bodyless 405 the check scored "MCP manifest found
+// at /.well-known/mcp but protocol handshake failed" (3/6) even though /mcp
+// itself handshakes cleanly.
+const WELL_KNOWN_MCP_PATH = '/.well-known/mcp';
+// Module-scope cache: the card is a static asset, immutable per deployment.
+let serverCardCache: string | null = null;
+async function serveServerCard(req: Request, corsHeaders: Record<string, string>): Promise<Response> {
+  if (serverCardCache === null) {
+    try {
+      const res = await fetch(new URL('/.well-known/mcp/server-card.json', req.url));
+      if (!res.ok) throw new Error(`server-card fetch ${res.status}`);
+      serverCardCache = await res.text();
+    } catch {
+      // Self-fetch failed (deploy skew / transient) — point the fetcher at the
+      // canonical static path instead of caching a failure.
+      return new Response(null, {
+        status: 302,
+        headers: { Location: '/.well-known/mcp/server-card.json', ...corsHeaders },
+      });
+    }
+  }
+  return new Response(serverCardCache, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+      ...corsHeaders,
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Main handler
 // ---------------------------------------------------------------------------
 export async function mcpHandler(
@@ -298,6 +336,21 @@ export async function mcpHandler(
   }
   if (req.method === 'HEAD') {
     return new Response(null, { status: 200, headers: withMcpNoStore({ 'Content-Type': 'application/json', ...corsHeaders }) });
+  }
+
+  // /.well-known/mcp manifest GET — served BEFORE Origin validation: the card
+  // is public static data, and browser-context fetchers (WebMCP agents) send
+  // an Origin header the gate below would 403. A GET that asks for
+  // `text/event-stream` (an SDK opening the optional standalone stream) or
+  // carries `Last-Event-ID` (SSE replay) falls through to the normal endpoint
+  // GET handling so transport semantics stay identical to /mcp.
+  if (
+    req.method === 'GET' &&
+    new URL(req.url).pathname === WELL_KNOWN_MCP_PATH &&
+    !req.headers.get('last-event-id') &&
+    !(req.headers.get('accept') ?? '').includes('text/event-stream')
+  ) {
+    return serveServerCard(req, corsHeaders);
   }
 
   // Origin validation: allow claude.ai/claude.com web clients; allow absent origin (desktop/CLI)
