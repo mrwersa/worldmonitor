@@ -23,7 +23,7 @@ describe('Python SDK package (sdk/python → PyPI worldmonitor-sdk)', () => {
   it('is the worldmonitor-sdk distribution with the product-domain homepage', () => {
     assert.match(pyproject, /^name = "worldmonitor-sdk"$/m);
     assert.match(pyproject, new RegExp(`^Homepage = "${HOMEPAGE}"$`, 'm'));
-    assert.match(pyproject, /^license = "AGPL-3\.0-or-later"$/m);
+    assert.match(pyproject, /^license = "MIT"$/m);
   });
 
   it('keeps __version__ in sync with pyproject.toml (drift guard)', () => {
@@ -47,7 +47,7 @@ describe('Ruby SDK package (sdk/ruby → gem worldmonitor)', () => {
     assert.match(gemspec, /spec\.name = "worldmonitor"/);
     assert.match(gemspec, new RegExp(`spec\\.homepage = "${HOMEPAGE}"`));
     assert.match(gemspec, new RegExp(`"homepage_uri" => "${HOMEPAGE}"`));
-    assert.match(gemspec, /spec\.license = "AGPL-3\.0-or-later"/);
+    assert.match(gemspec, /spec\.license = "MIT"/);
   });
 
   it('declares VERSION where the gemspec and publish workflow read it', () => {

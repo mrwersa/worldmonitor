@@ -52,4 +52,4 @@ Both derive from `WorldMonitor::Error`.
 | `mcp_url:` | `WORLDMONITOR_MCP_URL` | `https://worldmonitor.app/mcp` |
 | `timeout:` | — | `30` seconds |
 
-The source lives in [`sdk/ruby/`](https://github.com/koala73/worldmonitor/tree/main/sdk/ruby) in the main repository. Docs: [worldmonitor.app/docs/sdks](https://www.worldmonitor.app/docs/sdks). License: AGPL-3.0-or-later.
+The source lives in [`sdk/ruby/`](https://github.com/koala73/worldmonitor/tree/main/sdk/ruby) in the main repository. Docs: [worldmonitor.app/docs/sdks](https://www.worldmonitor.app/docs/sdks). License: MIT (thin client; the World Monitor platform itself remains AGPL-3.0).

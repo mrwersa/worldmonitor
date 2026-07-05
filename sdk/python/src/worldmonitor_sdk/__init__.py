@@ -25,7 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # Cloudflare's WAF challenges generic library User-Agents (python-requests,
 # python-urllib, curl, empty) on the API edge, so we always identify ourselves.

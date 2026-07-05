@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
                      "integration. Stdlib-only (Net::HTTP), MCP-first — the same design as the " \
                      "official worldmonitor npm CLI."
   spec.authors = ["World Monitor"]
-  spec.license = "AGPL-3.0-or-later"
+  spec.license = "MIT"
 
   # The homepage is how agents (and agent-readiness scanners) verify this gem
   # is the product's official SDK — keep it on the product domain.

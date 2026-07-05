@@ -73,4 +73,4 @@ Use `errors.As` to branch on them.
 | `MCPURL` | `WORLDMONITOR_MCP_URL` | `https://worldmonitor.app/mcp` |
 | `HTTPClient` | — | `http.Client` with a 30s timeout |
 
-The source lives in [`sdk/go/`](https://github.com/koala73/worldmonitor/tree/main/sdk/go) in the main repository and is versioned with `sdk/go/vX.Y.Z` tags. Docs: [worldmonitor.app/docs/sdks](https://www.worldmonitor.app/docs/sdks). License: AGPL-3.0-or-later.
+The source lives in [`sdk/go/`](https://github.com/koala73/worldmonitor/tree/main/sdk/go) in the main repository and is versioned with `sdk/go/vX.Y.Z` tags. Docs: [worldmonitor.app/docs/sdks](https://www.worldmonitor.app/docs/sdks). License: MIT (thin client; the World Monitor platform itself remains AGPL-3.0).
