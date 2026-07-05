@@ -82,15 +82,25 @@ describe('nlweb: /ask endpoint', () => {
     assert.equal(frames.at(-1).message_type, 'complete');
   });
 
-  it('streaming also triggers via top-level streaming flag and Accept header', async () => {
+  it('streaming also triggers via top-level flag, Accept header, and ?prefer.streaming=', async () => {
     for (const req of [
       post({ query: 'conflict events', streaming: true }),
       post({ query: 'conflict events' }, { Accept: 'text/event-stream' }),
+      handler(new Request('https://worldmonitor.app/ask?query=markets&prefer.streaming=true', { method: 'GET' })),
     ]) {
       const res = await req;
       assert.match(res.headers.get('Content-Type'), /text\/event-stream/);
       await res.text();
     }
+  });
+
+  it('query-less streaming probes get the usage envelope as SSE, not JSON', async () => {
+    const res = await post({ prefer: { streaming: true } });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('Content-Type'), /text\/event-stream/);
+    const text = await res.text();
+    assert.ok(text.includes('event: start'), 'must open with a start event');
+    assert.ok(text.includes('event: complete'), 'must close with a complete event');
   });
 
   it('GET with ?query= works for simple probes', async () => {

@@ -134,6 +134,7 @@ async function extractParams(req: Request): Promise<AskParams | null> {
     body.streaming === 'true' ||
     prefer?.streaming === true ||
     url.searchParams.get('streaming') === 'true' ||
+    url.searchParams.get('prefer.streaming') === 'true' ||
     (req.headers.get('accept') ?? '').includes('text/event-stream');
   const queryId =
     (typeof body.query_id === 'string' && body.query_id.slice(0, 128)) || crypto.randomUUID();
@@ -217,7 +218,13 @@ export default async function handler(req: Request): Promise<Response> {
     // A query-less probe gets a 200 with a conformant, self-describing NLWeb
     // envelope (empty results + usage) rather than a 4xx — scanners and
     // agents doing a bare existence check read a 4xx as "no endpoint here"
-    // (orank's nlweb-ask detector did exactly that).
+    // (orank's nlweb-ask detector did exactly that). When the probe asks for
+    // streaming, honour it: the same usage envelope goes out as SSE
+    // (start → complete) so a query-less streaming capability check sees
+    // text/event-stream, not JSON.
+    if (params.streaming) {
+      return streamingResponse(params, []);
+    }
     return new Response(
       JSON.stringify({
         _meta: buildMeta(params.mode),
