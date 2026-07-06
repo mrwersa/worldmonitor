@@ -100,7 +100,7 @@ Returns the tier view-model used by the `/pro` pricing page. Cached in Redis und
 
 Notes:
 
-- Price fields are flat on the tier. Paid tiers expose `monthlyPrice` / `monthlyProductId` and `annualPrice` / `annualProductId`. Free uses `price: 0, period: "forever"`; Enterprise uses `price: null`.
+- Price fields are flat on the tier. Paid tiers always expose `monthlyPrice` / `monthlyProductId`, and add `annualPrice` / `annualProductId` only when an annual variant exists — API Business is monthly-only, so those fields are absent on it. Free uses `price: 0, period: "forever"`; Enterprise uses `price: null`.
 - Prices are dollars (Dodo returns cents; the handler divides by 100). Currency is implicit USD for the published catalog.
 
 ### `DELETE /api/product-catalog`
