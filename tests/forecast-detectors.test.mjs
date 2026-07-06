@@ -486,6 +486,39 @@ describe('word-boundary term matching: no substring false positives (#4933)', ()
     });
     assert.ok(score > 0);
   });
+
+  it('computeHeadlineRelevance: plural form of a domain hint still scores (attacks vs attack)', () => {
+    const score = computeHeadlineRelevance('Missile attacks intensify near border', [], 'conflict', {
+      requireSemantic: true,
+    });
+    assert.ok(score > 0);
+  });
+
+  it('calibrateWithMarkets: plural domain hint still calibrates (elections vs election)', () => {
+    const pred = makePrediction('political', 'Nigeria', 'Political instability: Nigeria', 0.7, 0.6, '30d', []);
+    calibrateWithMarkets([pred], {
+      geopolitical: [{ title: 'Will Nigeria hold peaceful elections in 2026?', yesPrice: 80, source: 'polymarket', volume: 50000 }],
+    });
+    assert.ok(pred.calibration !== null);
+    assert.equal(pred.probability, +(0.4 * 0.8 + 0.6 * 0.7).toFixed(3));
+  });
+
+  it('getSearchTermsForRegion: DR Congo resolves to DR Congo, not Congo-Brazzaville', () => {
+    const terms = getSearchTermsForRegion('DR Congo').map(t => t.toLowerCase());
+    assert.ok(!terms.includes('brazzaville'), `DR Congo leaked Congo-Brazzaville terms: ${terms.join(', ')}`);
+    assert.ok(terms.includes('kinshasa'), `DR Congo lost its own keywords: ${terms.join(', ')}`);
+  });
+
+  it('getSearchTermsForRegion: Guinea-Bissau does not inherit Guinea/Conakry terms', () => {
+    const terms = getSearchTermsForRegion('Guinea-Bissau').map(t => t.toLowerCase());
+    assert.ok(!terms.includes('conakry'), `Guinea-Bissau leaked Guinea terms: ${terms.join(', ')}`);
+    assert.ok(terms.includes('guinea-bissau'));
+  });
+
+  it('getSearchTermsForRegion: Papua New Guinea does not inherit Guinea/Conakry terms', () => {
+    const terms = getSearchTermsForRegion('Papua New Guinea').map(t => t.toLowerCase());
+    assert.ok(!terms.includes('conakry'), `Papua New Guinea leaked Guinea terms: ${terms.join(', ')}`);
+  });
 });
 
 describe('computeTrends', () => {

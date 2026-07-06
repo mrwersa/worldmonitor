@@ -2060,6 +2060,9 @@ function tokenizeText(text) {
 // Word-boundary term matching to prevent substring false positives
 // (Mali matching Somalia, Niger matching Nigeria, Iran matching Tirana).
 // Boundary class mirrors the tokenizeText delimiter so both matchers agree.
+// A plural suffix (s/es) on the text side still counts — attacks/elections
+// must match the singular hints — but a term nested inside a DIFFERENT word
+// never does.
 const TERM_MATCH_REGEX_CACHE_MAX = 4000;
 const termMatchRegexCache = new Map();
 function textIncludesTerm(lowerText, lowerTerm) {
@@ -2070,7 +2073,7 @@ function textIncludesTerm(lowerText, lowerTerm) {
       termMatchRegexCache.delete(termMatchRegexCache.keys().next().value);
     }
     const escaped = lowerTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    re = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`);
+    re = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:s|es)?(?:[^a-z0-9]|$)`);
     termMatchRegexCache.set(lowerTerm, re);
   }
   return re.test(lowerText);
@@ -2433,13 +2436,24 @@ function getSearchTermsForRegion(region) {
   if (!countryEntry) {
     const regionLower = region.toLowerCase();
     const regionBase = region.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase(); // strip "(Zaire)", "(Burma)", etc.
+    // Exact name match always wins; containment falls back to the LONGEST
+    // contained name so "DR Congo" resolves to DR Congo, never Congo, and
+    // "Guinea-Bissau" / "Papua New Guinea" never inherit Guinea's terms.
+    let matched = null;
     for (const [, entry] of Object.entries(codes)) {
       const nameLower = entry.name.toLowerCase();
-      if (nameLower === regionLower || nameLower === regionBase || textIncludesTerm(regionLower, nameLower)) {
-        terms.push(entry.name);
-        terms.push(...entry.keywords);
+      if (nameLower === regionLower || nameLower === regionBase) {
+        matched = entry;
         break;
       }
+      if (textIncludesTerm(regionLower, nameLower)
+        && (!matched || nameLower.length > matched.name.length)) {
+        matched = entry;
+      }
+    }
+    if (matched) {
+      terms.push(matched.name);
+      terms.push(...matched.keywords);
     }
   }
 
