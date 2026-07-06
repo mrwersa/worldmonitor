@@ -27,6 +27,7 @@ import {
   computeConfidence,
   computeHeadlineRelevance,
   computeMarketMatchScore,
+  getSearchTermsForRegion,
   sanitizeForPrompt,
   parseLLMScenarios,
   validateScenarios,
@@ -441,6 +442,49 @@ describe('word-boundary term matching: no substring false positives (#4933)', ()
     const pred = makePrediction('market', 'Middle East', 'Oil disruption', 0.6, 0.5, '7d', []);
     const score = computeMarketMatchScore(pred, 'Will the Strait of Hormuz close in 2026?', ['strait of hormuz']);
     assert.ok(score.regionHits >= 1);
+  });
+
+  it('getSearchTermsForRegion: Somalia does not inherit Mali terms via reverse substring lookup', () => {
+    const terms = getSearchTermsForRegion('Somalia').map(t => t.toLowerCase());
+    assert.ok(!terms.includes('bamako'), `Somalia terms leaked Mali keywords: ${terms.join(', ')}`);
+    assert.ok(!terms.some(t => t === 'mali'), `Somalia terms leaked Mali name: ${terms.join(', ')}`);
+    assert.ok(terms.includes('mogadishu'), `Somalia lost its own keywords to the substring break: ${terms.join(', ')}`);
+  });
+
+  it('getSearchTermsForRegion: Nigeria does not inherit Niger terms via reverse substring lookup', () => {
+    const terms = getSearchTermsForRegion('Nigeria').map(t => t.toLowerCase());
+    assert.ok(!terms.includes('niamey'), `Nigeria terms leaked Niger keywords: ${terms.join(', ')}`);
+    assert.ok(!terms.some(t => t === 'niger'), `Nigeria terms leaked Niger name: ${terms.join(', ')}`);
+  });
+
+  it('getSearchTermsForRegion: parenthetical suffix regions still resolve (positive control)', () => {
+    const terms = getSearchTermsForRegion('Myanmar (Burma)').map(t => t.toLowerCase());
+    assert.ok(terms.includes('myanmar'));
+  });
+
+  it('calibrateWithMarkets: Nigeria forecast is not calibrated by a Niger market (reverse-lookup poisoning)', () => {
+    const pred = makePrediction('political', 'Nigeria', 'Political instability: Nigeria', 0.7, 0.6, '30d', []);
+    calibrateWithMarkets([pred], {
+      geopolitical: [{ title: "Will Niger's junta lose power in 2026?", yesPrice: 30, source: 'polymarket', volume: 50000 }],
+    });
+    assert.equal(pred.calibration, null);
+    assert.equal(pred.probability, 0.7);
+  });
+
+  it('computeHeadlineRelevance: "war" hint does not hit inside "award", "iran" token not inside "Tirana"', () => {
+    const score = computeHeadlineRelevance('Award season kicks off in Tirana', [], 'conflict', {
+      titleTokens: ['iran'],
+      requireSemantic: true,
+    });
+    assert.equal(score, 0);
+  });
+
+  it('computeHeadlineRelevance: exact domain hint and title token still score (positive control)', () => {
+    const score = computeHeadlineRelevance('War fears grow as Iran mobilizes reservists', ['iran'], 'conflict', {
+      titleTokens: ['iran'],
+      requireSemantic: true,
+    });
+    assert.ok(score > 0);
   });
 });
 

@@ -2066,7 +2066,9 @@ function textIncludesTerm(lowerText, lowerTerm) {
   if (!lowerText || !lowerTerm) return false;
   let re = termMatchRegexCache.get(lowerTerm);
   if (!re) {
-    if (termMatchRegexCache.size >= TERM_MATCH_REGEX_CACHE_MAX) termMatchRegexCache.clear();
+    if (termMatchRegexCache.size >= TERM_MATCH_REGEX_CACHE_MAX) {
+      termMatchRegexCache.delete(termMatchRegexCache.keys().next().value);
+    }
     const escaped = lowerTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     re = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`);
     termMatchRegexCache.set(lowerTerm, re);
@@ -2127,16 +2129,16 @@ function computeHeadlineRelevance(headline, terms, domain, options = {}) {
   const tagMismatch = headlineTags.length > 0 && expectedTags.size > 0 && !tagOverlap;
   let score = regionScore + (tagOverlap ? 3 : 0) - (tagMismatch ? 4 : 0);
   for (const hint of getDomainTerms(domain)) {
-    if (lower.includes(hint)) score += 1;
+    if (textIncludesTerm(lower, hint)) score += 1;
   }
   const titleTokens = options.titleTokens || [];
   for (const token of titleTokens) {
-    if (lower.includes(token)) score += 2;
+    if (textIncludesTerm(lower, token)) score += 2;
   }
   if (options.requireRegion && regionHits === 0 && !tagOverlap) return 0;
   if (options.requireSemantic) {
-    const domainHits = getDomainTerms(domain).filter(hint => lower.includes(hint)).length;
-    const titleHits = titleTokens.filter(token => lower.includes(token)).length;
+    const domainHits = getDomainTerms(domain).filter(hint => textIncludesTerm(lower, hint)).length;
+    const titleHits = titleTokens.filter(token => textIncludesTerm(lower, token)).length;
     if (domainHits === 0 && titleHits === 0) return 0;
   }
   return Math.max(0, score);
@@ -2433,7 +2435,7 @@ function getSearchTermsForRegion(region) {
     const regionBase = region.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase(); // strip "(Zaire)", "(Burma)", etc.
     for (const [, entry] of Object.entries(codes)) {
       const nameLower = entry.name.toLowerCase();
-      if (nameLower === regionLower || nameLower === regionBase || regionLower.includes(nameLower)) {
+      if (nameLower === regionLower || nameLower === regionBase || textIncludesTerm(regionLower, nameLower)) {
         terms.push(entry.name);
         terms.push(...entry.keywords);
         break;
