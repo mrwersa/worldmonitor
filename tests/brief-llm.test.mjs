@@ -1724,16 +1724,20 @@ describe('generateStoryDescription — sanitisation + prefix bump (U5)', () => {
     assert.match(setCalls[0].key, /^brief:llm:description:v4:/, 'cache prefix must be v4 post-bump (#4944 U4 model cutover)');
   });
 
-  it('ignores stale v1 / v2 cache entries (prefix bump forces cold start)', async () => {
-    // Simulate leftover v1 and v2 rows; writer now keys on v4 (#4944 U4
-    // bumped v2→v3 alongside category persistence), reader is keyed on
-    // the current prefix too, so the stale rows are effectively dark —
-    // verified by the reader not serving a matching stale row.
+  it('ignores stale v1 / v2 / v3 cache entries (prefix bump forces cold start)', async () => {
+    // Simulate leftover rows from every prior prefix era: v1 (pre
+    // RSS-grounding), v2 (pre category-persistence, PR #3751 bumped
+    // v2→v3), and v3 (pre model-cutover — #4944 U4 bumps v3→v4 so
+    // old-model prose ages out). The writer and reader both key on v4,
+    // so all stale rows are effectively dark — verified by the reader
+    // not serving any matching stale row.
     const store = new Map();
     const v1Key = `brief:llm:description:v1:${await hashBriefStory(story())}`;
     const v2Key = `brief:llm:description:v2:${await hashBriefStory(story())}`;
+    const v3Key = `brief:llm:description:v3:${await hashBriefStory(story())}`;
     store.set(v1Key, 'Pre-fix hallucinated body citing Ali Khamenei.');
     store.set(v2Key, 'Pre-category-persistence body assuming category=General everywhere.');
+    store.set(v3Key, 'Old-model (pre-#4944) prose that must not survive the cutover.');
     const cache = {
       async cacheGet(key) { return store.get(key) ?? null; },
       async cacheSet(key, value) { store.set(key, value); },
@@ -1743,7 +1747,7 @@ describe('generateStoryDescription — sanitisation + prefix bump (U5)', () => {
       story(),
       { ...cache, callLLM: async () => fresh },
     );
-    assert.strictEqual(out, fresh, 'stale v1/v2 rows must NOT be served post-bump');
+    assert.strictEqual(out, fresh, 'stale v1/v2/v3 rows must NOT be served post-bump');
     // And the freshly-written row lands under v4.
     const v4Keys = [...store.keys()].filter((k) => k.startsWith('brief:llm:description:v4:'));
     assert.strictEqual(v4Keys.length, 1);
