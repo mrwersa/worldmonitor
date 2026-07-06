@@ -37,12 +37,17 @@ export function loadWidgets(): CustomWidgetSpec[] {
   for (const w of raw) {
     const tier = w.tier === 'pro' ? 'pro' : 'basic';
     if (tier === 'pro') {
-      const proHtml = localStorage.getItem(proHtmlKey(w.id));
+      const sideKeyHtml = localStorage.getItem(proHtmlKey(w.id));
+      const storedHtml = typeof w.html === 'string' ? w.html : '';
+      const proHtml = sideKeyHtml || storedHtml;
       if (!proHtml) {
         // HTML missing — drop widget and clean up spans
         clearPanelSpanEntry(w.id);
         clearPanelColSpanEntry(w.id);
         continue;
+      }
+      if (!sideKeyHtml && storedHtml) {
+        try { localStorage.setItem(proHtmlKey(w.id), storedHtml); } catch { /* best-effort side-key repair */ }
       }
       result.push({ ...w, tier, html: proHtml });
     } else {
@@ -61,10 +66,9 @@ export function saveWidget(spec: CustomWidgetSpec): void {
     } catch {
       throw new Error('Storage quota exceeded saving PRO widget HTML');
     }
-    // Build metadata entry (no html field)
-    const meta: Omit<CustomWidgetSpec, 'html'> & { html: string } = {
+    const meta: CustomWidgetSpec = {
       ...spec,
-      html: '',
+      html: proHtml,
       conversationHistory: spec.conversationHistory.slice(-MAX_HISTORY),
     };
     const existing = loadFromStorage<CustomWidgetSpec[]>(STORAGE_KEY, []).filter(w => w.id !== spec.id);

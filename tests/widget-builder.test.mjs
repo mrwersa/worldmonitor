@@ -1130,12 +1130,21 @@ describe('PRO widget — store and sanitizer', () => {
     );
   });
 
-  it("loadWidgets drops PRO entry when wm-pro-html-{id} is missing", () => {
+  it('loadWidgets falls back to canonical PRO HTML when wm-pro-html-{id} is missing', () => {
     const loadIdx = store.indexOf('function loadWidgets');
-    const loadBody = store.slice(loadIdx, loadIdx + 600);
+    const loadBody = store.slice(loadIdx, loadIdx + 900);
     assert.ok(
-      loadBody.includes('continue') || loadBody.includes('skip'),
-      'loadWidgets must skip/drop PRO entries with missing HTML key',
+      loadBody.includes('sideKeyHtml || storedHtml'),
+      'loadWidgets must use the canonical widget entry as the PRO HTML fallback',
+    );
+  });
+
+  it('loadWidgets drops PRO entry only when no persisted HTML remains', () => {
+    const loadIdx = store.indexOf('function loadWidgets');
+    const loadBody = store.slice(loadIdx, loadIdx + 900);
+    assert.ok(
+      loadBody.includes('if (!proHtml)') && loadBody.includes('continue'),
+      'loadWidgets must skip/drop PRO entries only when no HTML exists in either storage path',
     );
   });
 
