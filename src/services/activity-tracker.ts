@@ -34,6 +34,20 @@ interface PersistedReadState {
   lastVisitAt: number;
 }
 
+/**
+ * #4926 external review: in sandboxed iframes / blocked-storage modes the
+ * `localStorage` accessor ITSELF throws (SecurityError) — `typeof` does
+ * not guard property-getter throws, only undeclared identifiers. All
+ * storage access goes through this helper; null = session-only mode.
+ */
+function getSafeLocalStorage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /** Duration for highlight glow effect (30 seconds) */
 export const HIGHLIGHT_DURATION_MS = 30 * 1000;
 
@@ -44,6 +58,14 @@ class ActivityTracker {
   /** lastVisitAt from the PREVIOUS session, read once at load (0 = none). */
   private previousVisitAt = 0;
   private lastPersistAt = 0;
+  /**
+   * #4926 external review (acknowledgement model): the persisted
+   * timestamp advances ONLY on genuine user interaction (scroll/click/
+   * visibility via markAsSeen) — never on the programmatic first-render
+   * markItemsSeen. A session with zero interaction persists NOTHING, so
+   * any number of reloads keeps away-stories NEW.
+   */
+  private lastInteractionAt: number | null = null;
   private lifecycleInstalled = false;
 
   constructor() {
@@ -90,9 +112,10 @@ class ActivityTracker {
   }
 
   private loadReadState(): void {
-    if (typeof localStorage === 'undefined') return;
+    const storage = getSafeLocalStorage();
+    if (!storage) return;
     try {
-      const raw = localStorage.getItem(READ_STATE_KEY);
+      const raw = storage.getItem(READ_STATE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<PersistedReadState>;
       if (parsed && typeof parsed.lastVisitAt === 'number' && Number.isFinite(parsed.lastVisitAt)) {
@@ -120,13 +143,18 @@ class ActivityTracker {
   }
 
   private persistLastVisit(force = false): void {
-    if (typeof localStorage === 'undefined') return;
+    // Nothing to persist until the user actually interacted this session
+    // — flushing "now" on unload/hide would mark away-stories seen after
+    // a plain F5 with zero acknowledgement.
+    if (this.lastInteractionAt === null) return;
+    const storage = getSafeLocalStorage();
+    if (!storage) return;
     const now = Date.now();
     if (!force && now - this.lastPersistAt < READ_STATE_PERSIST_INTERVAL_MS) return;
     this.lastPersistAt = now;
     try {
-      const state: PersistedReadState = { v: 1, lastVisitAt: now };
-      localStorage.setItem(READ_STATE_KEY, JSON.stringify(state));
+      const state: PersistedReadState = { v: 1, lastVisitAt: this.lastInteractionAt };
+      storage.setItem(READ_STATE_KEY, JSON.stringify(state));
     } catch {
       // Quota/privacy-mode failures degrade to session-only behavior.
     }
@@ -136,6 +164,7 @@ class ActivityTracker {
   _reloadReadStateForTests(): void {
     this.previousVisitAt = 0;
     this.lastPersistAt = 0;
+    this.lastInteractionAt = null;
     this.loadReadState();
   }
 
@@ -144,6 +173,10 @@ class ActivityTracker {
    */
   register(panelId: string): void {
     this.installLifecycleListeners();
+    // Cloud prefs may have applied between module load and the first
+    // panel registering — re-read (monotonic) so the first partition
+    // sees a cross-device visit that landed in that window.
+    this.refreshPreviousVisitFromStorage();
     if (!this.panels.has(panelId)) {
       this.panels.set(panelId, {
         seenIds: new Set(),
@@ -211,6 +244,7 @@ class ActivityTracker {
 
     state.newCount = 0;
     state.lastInteraction = Date.now();
+    this.lastInteractionAt = Date.now();
     this.persistLastVisit();
 
     // Notify listeners
@@ -238,7 +272,8 @@ class ActivityTracker {
     }
     state.newCount = unseen;
     state.lastInteraction = Date.now();
-    this.persistLastVisit();
+    // Deliberately NO persistence here: this is programmatic bootstrap
+    // marking, not user acknowledgement (#4926 external review P1).
 
     const callback = this.onChangeCallbacks.get(panelId);
     if (callback) {

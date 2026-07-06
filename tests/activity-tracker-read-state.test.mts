@@ -85,15 +85,22 @@ describe('persisted read-state (#4923)', () => {
     assert.ok(first, 'first write happened');
   });
 
-  it('visibilitychange:hidden force-flushes past the throttle', () => {
+  it('visibilitychange:hidden force-flushes past the throttle — but ONLY after genuine interaction', () => {
     activityTracker.register('panel'); // lazy-installs lifecycle listeners
-    activityTracker.updateItems('panel', ['a']);
-    activityTracker.markAsSeen('panel');
-    store.delete(READ_STATE_KEY);
     const onVisibility = documentHandlers.get('visibilitychange');
     assert.ok(onVisibility, 'visibilitychange listener installed on first register');
+
+    // No interaction yet: the flush must persist NOTHING (#4926 review P1
+    // — a minted "now" here marked away-stories seen without acknowledgement).
+    activityTracker.updateItems('panel', ['a']);
+    activityTracker.markItemsSeen('panel', ['a']);
     onVisibility!();
-    assert.ok(store.has(READ_STATE_KEY), 'hidden-tab flush bypasses the throttle');
+    assert.equal(store.has(READ_STATE_KEY), false, 'zero-interaction session persists nothing');
+
+    activityTracker.markAsSeen('panel');
+    store.delete(READ_STATE_KEY);
+    onVisibility!();
+    assert.ok(store.has(READ_STATE_KEY), 'post-interaction flush bypasses the throttle');
   });
 
   it('localStorage quota/privacy failures degrade silently', () => {
@@ -206,5 +213,70 @@ describe('NewsPanel first-render wiring (source-textual)', () => {
       'utf-8',
     );
     assert.match(syncSrc, /'wm-read-state-v1'/);
+  });
+});
+
+describe('acknowledgement model (#4926 external review P1)', () => {
+  it('REGRESSION: F5 before any interaction keeps away-stories NEW (markItemsSeen persists nothing)', () => {
+    store.clear();
+    activityTracker.clear();
+    // Session 1: previous visit was yesterday; first render partitions and
+    // programmatically marks old items seen. User hits F5 WITHOUT ever
+    // scrolling/clicking.
+    store.set(READ_STATE_KEY, JSON.stringify({ v: 1, lastVisitAt: 1_000 }));
+    activityTracker._reloadReadStateForTests();
+    activityTracker.register('panel');
+    activityTracker.updateItems('panel', ['old', 'away']);
+    activityTracker.markItemsSeen('panel', ['old']);
+    assert.equal(store.get(READ_STATE_KEY), JSON.stringify({ v: 1, lastVisitAt: 1_000 }),
+      'programmatic bootstrap marking must not advance the persisted visit');
+
+    // Session 2 (the reload): previous visit is STILL yesterday.
+    activityTracker.clear();
+    activityTracker._reloadReadStateForTests();
+    assert.equal(activityTracker.getPreviousVisitTime(), 1_000, 'away stories stay NEW after F5');
+  });
+
+  it('genuine interaction advances the persisted visit to the interaction time', () => {
+    store.clear();
+    activityTracker.clear();
+    store.set(READ_STATE_KEY, JSON.stringify({ v: 1, lastVisitAt: 1_000 }));
+    activityTracker._reloadReadStateForTests();
+    activityTracker.register('panel');
+    activityTracker.updateItems('panel', ['a']);
+    const before = Date.now();
+    activityTracker.markAsSeen('panel');
+    const persisted = JSON.parse(store.get(READ_STATE_KEY)!);
+    assert.ok(persisted.lastVisitAt >= before, 'interaction persists the acknowledgement time');
+  });
+
+  it('register() re-reads storage so a cloud value landing pre-first-render is seen (#4926-2)', () => {
+    store.clear();
+    activityTracker.clear();
+    activityTracker._reloadReadStateForTests();
+    assert.equal(activityTracker.getPreviousVisitTime(), 0);
+    // Cloud blob applies between module load and first panel registration.
+    store.set(READ_STATE_KEY, JSON.stringify({ v: 1, lastVisitAt: 5_000 }));
+    activityTracker.register('late-panel');
+    assert.equal(activityTracker.getPreviousVisitTime(), 5_000, 'first partition must see the cloud visit');
+  });
+});
+
+describe('sandboxed-storage safety (#4926 external review #3)', () => {
+  it('a THROWING localStorage accessor degrades to session-only instead of crashing', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')!;
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() { throw new Error('SecurityError: access denied'); },
+    });
+    try {
+      assert.doesNotThrow(() => activityTracker._reloadReadStateForTests());
+      assert.equal(activityTracker.getPreviousVisitTime(), 0);
+      activityTracker.register('panel');
+      activityTracker.updateItems('panel', ['a']);
+      assert.doesNotThrow(() => activityTracker.markAsSeen('panel'));
+    } finally {
+      Object.defineProperty(globalThis, 'localStorage', descriptor);
+    }
   });
 });
