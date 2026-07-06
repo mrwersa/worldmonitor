@@ -1,6 +1,6 @@
 # Pro monetization — current architecture
 
-**Last verified**: 2026-04-21 against `origin/main @ 2f19d9635`.
+**Last verified**: 2026-07-06 (tier model updated for API Business publication, PR #4946).
 
 Factual snapshot of how authentication, payments, entitlements, and billing management work today. Not aspirational. If you're reading this because `docs/roadmap-pro.md` said something different, that document is archived at [`docs/plans/archive/roadmap-pro-HISTORICAL.md`](../plans/archive/roadmap-pro-HISTORICAL.md) — ignore it.
 

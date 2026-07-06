@@ -60,7 +60,7 @@ paths:
                                                     type: boolean
                                                 price:
                                                     type: [number, "null"]
-                                                    description: Flat price for non-subscription tiers — 0 for Free, null for Enterprise (custom pricing). Absent on subscription tiers, which carry monthlyPrice/annualPrice instead.
+                                                    description: Flat price for non-subscription tiers — 0 for Free, null for Enterprise (custom pricing). Absent on subscription tiers, which always carry monthlyPrice and add annualPrice/annualProductId only when an annual variant exists (API Business is monthly-only).
                                                 period:
                                                     type: string
                                                 monthlyPrice:
