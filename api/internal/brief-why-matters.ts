@@ -417,6 +417,12 @@ export default async function handler(req: Request, ctx?: EdgeContext): Promise<
   // DeepSeek (LLM_REASONING_MODEL) — v8 rows carry the old model's voice
   // and must age out at cutover.
   //
+  // MERGE-ORDER GUARD: this bump must deploy only AFTER the U3 env flip
+  // (LLM_REASONING_MODEL=deepseek-v4-pro) is live — the fill model is
+  // env-governed, so deploying v9 against the old env would seed the fresh
+  // namespace with old-model prose and nothing later would evict it.
+  // Preconditions are pinned in PR #4967's body.
+  //
   // v6 history (kept for reference): category-gated context + prompt-level
   // RELEVANCE RULE (2026-04-22) — those changes remain in v9.
   const cacheKey = `brief:llm:whymatters:v9:${hash}`;

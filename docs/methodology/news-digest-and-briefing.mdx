@@ -308,10 +308,10 @@ described above.
 
 WorldMonitor Brief uses two LLM surfaces:
 
-- Digest prose (`brief:llm:digest:v8`) produces a JSON lead, thread list,
+- Digest prose (`brief:llm:digest:v9`) produces a JSON lead, thread list,
   signals, and `rankedStoryHashes` from the visible story pool.
-- Per-story `whyMatters` uses an analyst endpoint first, then a direct Gemini
-  fallback, then the baseline stub if every LLM layer fails.
+- Per-story `whyMatters` uses an analyst endpoint first, then a direct
+  OpenRouter-chain fallback, then the baseline stub if every LLM layer fails.
 
 Both paths are grounded. Prompt inputs are built from story fields that were
 already selected by the deterministic pipeline. The digest prose cache key
