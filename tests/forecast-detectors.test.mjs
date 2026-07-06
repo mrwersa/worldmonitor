@@ -3206,9 +3206,9 @@ describe('stable forecast ids: semantic slots, not volatile titles (#4933)', () 
     assert.equal(b[0].priorProbability, 0.1);
   });
 
-  it('state-derived id keys on domain+bucket+dominantRegion, not the volatile cluster label', () => {
+  it('state-derived id keys on the stable state-unit identity, not the volatile cluster label', () => {
     const mkUnit = (label) => ({
-      id: `state-${label}`, label, stateKind: 'market_stress',
+      id: 'state-abc123', label, stateKind: 'market_stress',
       dominantRegion: 'Middle East', regions: ['Middle East'],
       avgProbability: 0.5, avgConfidence: 0.5,
       situationCount: 2, forecastCount: 3,
@@ -3219,6 +3219,20 @@ describe('stable forecast ids: semantic slots, not volatile titles (#4933)', () 
     const b = buildStateDerivedForecast(mkUnit('Gulf energy stress cluster'), 'market', bucket, candidate, null);
     assert.notEqual(a.title, b.title);
     assert.equal(a.id, b.id);
+  });
+
+  it('two DISTINCT state units in the same region+bucket keep distinct ids (no slot collapse)', () => {
+    const mkUnit = (id, label) => ({
+      id, label, stateKind: 'market_stress',
+      dominantRegion: 'Middle East', regions: ['Middle East'],
+      avgProbability: 0.5, avgConfidence: 0.5,
+      situationCount: 2, forecastCount: 3,
+    });
+    const bucket = { id: 'energy', label: 'Energy', pressureScore: 0.6, confidence: 0.5 };
+    const candidate = { score: 0.6, criticalLift: 0, primarySignalType: 'energy_supply_shock', primaryChannel: 'energy' };
+    const a = buildStateDerivedForecast(mkUnit('state-hormuz1', 'Hormuz pressure complex'), 'market', bucket, candidate, null);
+    const b = buildStateDerivedForecast(mkUnit('state-redsea2', 'Red Sea freight stress'), 'market', bucket, candidate, null);
+    assert.notEqual(a.id, b.id);
   });
 
   it('forecastIdFromKey is deterministic, domain-scoped, and keeps the fc-<domain>-<8hex> format', () => {

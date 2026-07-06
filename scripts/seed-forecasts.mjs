@@ -1464,7 +1464,11 @@ function buildStateDerivedForecast(stateUnit, domain, bucket, candidate, marketC
     domain === 'supply_chain' ? '7d' : '30d',
     signals,
   );
-  prediction.id = forecastIdFromKey(domain, `state:${bucket.id}:${stateUnit?.dominantRegion || stateUnit?.regions?.[0] || ''}`);
+  // Key on the canonical state-unit identity (content hash over structural
+  // fields, NOT the display label) plus bucket: label churn no longer moves
+  // the id, while two distinct same-region/same-bucket units keep distinct
+  // ids — the cross-state dedup intentionally publishes up to 2 such bets.
+  prediction.id = forecastIdFromKey(domain, `state:${bucket.id}:${stateUnit?.id || stateUnit?.dominantRegion || stateUnit?.regions?.[0] || ''}`);
   prediction.generationOrigin = 'state_derived';
   prediction.feedSummary = buildStateDerivedFeedSummary(
     domain,
