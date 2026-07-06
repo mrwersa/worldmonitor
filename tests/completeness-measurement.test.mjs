@@ -321,3 +321,42 @@ describe('selection attribution: same-source overflow (#4927 re-review)', () => 
       'every considered cluster is attributed exactly once');
   });
 });
+
+describe('durable activation lifecycle (#4927 re-review P1)', () => {
+  it('classifyKey: on-demand softening is revoked once the activation marker exists', async () => {
+    const { __testing__ } = await import('../api/health.js');
+    const { classifyKey, ACTIVATION_MARKERS } = __testing__;
+    assert.ok(ACTIVATION_MARKERS.newsFeedHealth.startsWith('seed-activated:'), 'marker namespace pinned');
+
+    const baseCtx = {
+      keyStrens: new Map([['news:feed-health:v1', 0]]),
+      keyErrors: new Map(),
+      keyMetaValues: new Map(),
+      keyMetaErrors: new Map(),
+      now: Date.now(),
+    };
+    // Never activated: missing data reads soft EMPTY_ON_DEMAND.
+    const pending = classifyKey('newsFeedHealth', 'news:feed-health:v1', { allowOnDemand: true },
+      { ...baseCtx, activatedNames: new Set() });
+    assert.equal(pending.status, 'EMPTY_ON_DEMAND');
+    // Activated then died (marker present, data+meta expired): must alarm.
+    const dead = classifyKey('newsFeedHealth', 'news:feed-health:v1', { allowOnDemand: true },
+      { ...baseCtx, activatedNames: new Set(['newsFeedHealth']) });
+    assert.equal(dead.status, 'EMPTY', 'post-activation missing data must be EMPTY, not softened');
+  });
+
+  it('publishers persist the durable marker with NO TTL alongside every publish', () => {
+    const feedSrc = readSrc('scripts/validate-rss-feeds.mjs');
+    assert.match(feedSrc, /\['SET', 'seed-activated:news:feed-health', '1'\]/,
+      'feed-health publisher must SET the marker');
+    assert.doesNotMatch(feedSrc, /'seed-activated:news:feed-health', '1', 'EX'/,
+      'marker must be durable — no TTL');
+    const recallSrc = readSrc('scripts/seed-recall-benchmark.mjs');
+    assert.match(recallSrc, /\['SET', 'seed-activated:news:recall-benchmark', '1'\]/);
+    const seedHealthSrc = readSrc('api/seed-health.js');
+    assert.match(seedHealthSrc, /activationKey: 'seed-activated:news:feed-health'/,
+      'seed-health gates pending-activation on the marker');
+    assert.match(seedHealthSrc, /cfg\.activationKey && !activatedMap\.get\(domain\)/,
+      'missing meta with marker present must fall through to missing/stale');
+  });
+});

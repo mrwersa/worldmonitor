@@ -143,6 +143,9 @@ async function main() {
     recordCount: result.total,
     sourceVersion: 'recall-benchmark-v1',
   }), 'EX', String(7 * 86400)]);
+  // Durable activation marker — NO TTL by design (#4927 re-review P1); see
+  // validate-rss-feeds.mjs for the rationale.
+  await upstashCommand(creds, ['SET', 'seed-activated:news:recall-benchmark', '1']);
   console.log(`published ${RECALL_KEY}`);
 }
 

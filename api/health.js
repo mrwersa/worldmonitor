@@ -496,8 +496,9 @@ const ON_DEMAND_KEYS = new Set([
   // #4927 review P1: activation-gated on the operator adding UPSTASH_* as GH
   // Actions secrets — the publishers skip silently without them, so a
   // never-activated key must read as soft EMPTY_ON_DEMAND, not EMPTY/CRIT,
-  // while the workflow stays green. Once the first publish lands, seed-meta
-  // staleness (maxStaleMin 2880) enforces freshness strictly.
+  // while the workflow stays green. On-demand softening is REVOKED once the
+  // durable activation marker exists (see ACTIVATION_MARKERS): after the
+  // first publish, missing data/meta is EMPTY/STALE_SEED like any other key.
   'newsFeedHealth',
   'newsRecallBenchmark',
   'newsThreatSummary', // relay classify loop — only written when mergedByCountry has entries; absent on quiet news periods
@@ -551,6 +552,17 @@ const ON_DEMAND_KEYS = new Set([
 // even when the data key has strlen=0. For producer-specific cases where the
 // payload must exist but recordCount=0 is valid, add to ZERO_RECORD_DATA_OK_KEYS
 // only.
+// #4927 re-review P1: "has ever published" must survive the 7d seed-meta
+// TTL — inferring activation from meta existence meant a publisher that ran
+// once and died read as healthy pending-activation again after the meta
+// expired. Publishers SET these markers with NO TTL on every successful
+// publish; when the marker exists the key leaves ON_DEMAND softening and
+// normal EMPTY/STALE_SEED rules apply.
+const ACTIVATION_MARKERS = {
+  newsFeedHealth: 'seed-activated:news:feed-health',
+  newsRecallBenchmark: 'seed-activated:news:recall-benchmark',
+};
+
 const EMPTY_DATA_OK_KEYS = new Set([
   'notamClosures', 'faaDelays', 'intlDelays', 'gpsjam', 'positiveGeoEvents', 'weatherAlerts',
   'earningsCalendar', 'econCalendar', 'cotPositioning',
@@ -689,7 +701,8 @@ function isCascadeCovered(name, hasData, keyStrens, keyErrors) {
 function classifyKey(name, redisKey, opts, ctx) {
   const { keyStrens, keyErrors, keyMetaValues, keyMetaErrors, now } = ctx;
   const seedCfg = SEED_META[name];
-  const isOnDemand = !!opts.allowOnDemand && ON_DEMAND_KEYS.has(name);
+  const isOnDemand = !!opts.allowOnDemand && ON_DEMAND_KEYS.has(name)
+    && !(ctx.activatedNames && ctx.activatedNames.has(name));
 
   const meta = readSeedMeta(seedCfg, keyMetaValues, keyMetaErrors, now);
 
@@ -864,6 +877,7 @@ export default async function handler(req, ctx) {
     ...Object.values(STANDALONE_KEYS),
   ];
   const allMetaKeys = Object.values(SEED_META).map(s => s.key);
+  const activationEntries = Object.entries(ACTIVATION_MARKERS);
 
   // STRLEN for data keys avoids loading large blobs into memory (OOM prevention).
   // NEG_SENTINEL ('__WM_NEG__') is 10 bytes — strlenIsData() rejects exactly
@@ -873,6 +887,7 @@ export default async function handler(req, ctx) {
     const commands = [
       ...allDataKeys.map(k => ['STRLEN', k]),
       ...allMetaKeys.map(k => ['GET', k]),
+      ...activationEntries.map(([, marker]) => ['EXISTS', marker]),
     ];
     if (!getRedisCredentials()) throw new Error('Redis not configured');
     results = await redisPipeline(commands, 8_000);
@@ -909,8 +924,16 @@ export default async function handler(req, ctx) {
     if (r?.error) keyMetaErrors.set(allMetaKeys[i], r.error);
     keyMetaValues.set(allMetaKeys[i], r?.result ?? null);
   }
+  // activatedNames: keys whose durable activation marker exists — these
+  // leave ON_DEMAND softening permanently (#4927 re-review P1). A marker
+  // read error degrades to not-activated (soft), never to a false alarm.
+  const activatedNames = new Set();
+  for (let i = 0; i < activationEntries.length; i++) {
+    const r = results[allDataKeys.length + allMetaKeys.length + i];
+    if (!r?.error && Number(r?.result) === 1) activatedNames.add(activationEntries[i][0]);
+  }
 
-  const classifyCtx = { keyStrens, keyErrors, keyMetaValues, keyMetaErrors, now };
+  const classifyCtx = { keyStrens, keyErrors, keyMetaValues, keyMetaErrors, activatedNames, now };
   const checks = {};
   const counts = { ok: 0, warn: 0, onDemandWarn: 0, staleContent: 0, crit: 0 };
   let totalChecks = 0;
@@ -1056,6 +1079,7 @@ export default async function handler(req, ctx) {
 export const __testing__ = {
   readSeedMeta,
   classifyKey,
+  ACTIVATION_MARKERS,
   STATUS_COUNTS,
   // U7 (Tier 3 parity test): exposed for tests/mcp-bootstrap-parity.test.mjs
   // to walk the canonical seeded-data inventory. Both consts are unexported

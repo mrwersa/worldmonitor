@@ -442,6 +442,11 @@ export async function publishFeedHealth(results) {
     recordCount: payload.summary.ok,
     sourceVersion: 'feed-health-v1',
   }), 'EX', String(7 * 86400)]);
+  // Durable activation marker — NO TTL by design (#4927 re-review P1):
+  // health endpoints soften missing data only while this key is absent;
+  // once we have ever published, a dead publisher must alarm as stale,
+  // not revert to pending-activation when the 7d meta expires.
+  await redis(['SET', 'seed-activated:news:feed-health', '1']);
 
   if (payload.silentZeros.length) {
     console.warn(`\nSILENT ZEROS (${payload.silentZeros.length} Google News wrappers delivering nothing across runs):`);

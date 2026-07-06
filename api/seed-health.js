@@ -30,12 +30,14 @@ const SEED_DOMAINS = {
   // #4920 completeness measurement — both run in the daily feed-validation
   // GitHub Actions workflow (00:00 UTC), not Railway. 1440-min cadence;
   // classifier stales at intervalMin*2 = one fully missed day.
-  // activationGated (#4927 review P1): published from GH Actions only when
-  // the operator has added the UPSTASH secrets; 'missing' must read as
-  // pending-activation (healthy) until the first publish, then normal
-  // staleness rules apply.
-  'news:feed-health':         { key: 'seed-meta:news:feed-health',         intervalMin: 1440, activationGated: true },
-  'news:recall-benchmark':    { key: 'seed-meta:news:recall-benchmark',    intervalMin: 1440, activationGated: true },
+  // activationKey (#4927 review P1 + re-review): published from GH Actions
+  // only when the operator has added the UPSTASH secrets. 'missing' reads
+  // as pending-activation (healthy) ONLY while the durable activation
+  // marker is absent — publishers SET it with no TTL on first success, so
+  // "has ever published" survives the 7d seed-meta TTL and a dead
+  // publisher alarms as missing/stale instead of reverting to pending.
+  'news:feed-health':         { key: 'seed-meta:news:feed-health',         intervalMin: 1440, activationKey: 'seed-activated:news:feed-health' },
+  'news:recall-benchmark':    { key: 'seed-meta:news:recall-benchmark',    intervalMin: 1440, activationKey: 'seed-activated:news:recall-benchmark' },
   // Phase 2 — Parameterized endpoints
   'unrest:events':            { key: 'seed-meta:unrest:events',            intervalMin: 15 },
   'cyber:threats':            { key: 'seed-meta:cyber:threats',            intervalMin: 240 },
@@ -271,12 +273,17 @@ async function getSeedBatch(entries) {
   const commands = [];
   const metaSlots = [];
   const probeSlots = [];
+  const activationSlots = [];
   for (const [domain, cfg] of entries) {
     metaSlots.push({ domain, key: cfg.key, index: commands.length });
     commands.push(['GET', cfg.key]);
     if (cfg.dataProbe?.key) {
       probeSlots.push({ domain, index: commands.length });
       commands.push(['GET', cfg.dataProbe.key]);
+    }
+    if (cfg.activationKey) {
+      activationSlots.push({ domain, index: commands.length });
+      commands.push(['EXISTS', cfg.activationKey]);
     }
   }
 
@@ -295,7 +302,11 @@ async function getSeedBatch(entries) {
   for (const slot of probeSlots) {
     probeMap.set(slot.domain, data[slot.index]?.result ?? null);
   }
-  return { metaMap, probeMap };
+  const activatedMap = new Map();
+  for (const slot of activationSlots) {
+    activatedMap.set(slot.domain, Number(data[slot.index]?.result) === 1);
+  }
+  return { metaMap, probeMap, activatedMap };
 }
 
 export default async function handler(req) {
@@ -314,9 +325,10 @@ export default async function handler(req) {
   const entries = Object.entries(SEED_DOMAINS);
 
   let metaMap;
+  let activatedMap = new Map();
   let probeMap;
   try {
-    ({ metaMap, probeMap } = await getSeedBatch(entries));
+    ({ metaMap, probeMap, activatedMap } = await getSeedBatch(entries));
   } catch {
     return jsonResponse({ error: 'Redis unavailable' }, 503, cors);
   }
@@ -330,9 +342,12 @@ export default async function handler(req) {
     const maxStalenessMs = cfg.intervalMin * 2 * 60 * 1000;
 
     if (!meta) {
-      if (cfg.activationGated) {
-        // Never seeded AND the seeder is operator-activation-gated: healthy
-        // pending state, not an alarm (#4927 review P1).
+      if (cfg.activationKey && !activatedMap.get(domain)) {
+        // Never seeded (durable marker absent) AND operator-activation-
+        // gated: healthy pending state, not an alarm (#4927 review P1).
+        // Once the marker exists, missing meta falls through to
+        // 'missing' — a publisher that ran once and died must alarm
+        // (#4927 re-review P1).
         seeds[domain] = { status: 'pending-activation', fetchedAt: null, recordCount: null, stale: false };
         continue;
       }
