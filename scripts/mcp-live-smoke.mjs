@@ -19,14 +19,27 @@
 //   1. initialize → notifications/initialized → ping (the connect sequence)
 //   2. a capability walk DERIVED from the initialize response — every
 //      advertised capability's methods must answer 200 with the id echoed
-//   3. the auth wall — anonymous tools/call must answer 401 (fast, not hang)
+//   3. the auth wall — anonymous tools/call must answer 401 carrying the
+//      origin's WWW-Authenticate challenge (fast, never a hang; the body is
+//      deliberately NOT parsed — the wire contract a strict client acts on is
+//      status + challenge header, and a CDN-fabricated 401 would lack it)
 //   4. OAuth routing — the endpoints declared by
 //      /.well-known/oauth-authorization-server must be reachable by POST
 //      (no 3xx redirect, no 405 — the #4938 fingerprints). Probes use a
 //      malformed body so nothing is ever registered/minted.
 //
-// Every request runs under a hard timeout: a transport-level hang (the #4937
-// symptom) reports as HANG instead of stalling the job.
+// Every request runs under a hard timeout that covers BODY READ, not just
+// response headers — a server/CDN that sends headers then stalls the body
+// reports as HANG instead of idling until the workflow timeout (the fetch
+// AbortSignal aborts the body stream too, so the timer is held until the
+// text is fully read).
+//
+// Request budget: the anonymous /mcp limiter is 60/min shared per client IP
+// and both hosts see the same runner IP, so the walk caps its fan-out
+// (MAX_PROMPT_GETS / MAX_RESOURCE_READS) and reuses each catalog listing
+// instead of re-fetching it per sub-walk. Current shape: ≤16 /mcp POSTs per
+// host (≤32 total) + 3 non-/mcp OAuth probes per host — comfortable headroom
+// under the bucket even as the prompt/resource catalogs grow.
 //
 // Usage: node scripts/mcp-live-smoke.mjs
 //   MCP_SMOKE_HOSTS=https://a,https://b  overrides the default host list.
@@ -35,8 +48,10 @@ const HOSTS = (process.env.MCP_SMOKE_HOSTS ?? 'https://worldmonitor.app,https://
   .split(',').map((h) => h.trim()).filter(Boolean);
 const TIMEOUT_MS = 15_000;
 const USER_AGENT = 'WorldMonitor-MCP-Smoke/1.0 (+https://worldmonitor.app; github-actions)';
-// Bound the per-host resources/read sweep so a future large catalog can't blow
-// the anon 60/min/IP limit (walk is ~17 calls/host today).
+// Fan-out caps: keep the walk inside the shared anon 60/min/IP bucket as the
+// catalogs grow. 6 covers today's full prompt registry and concrete resource
+// list; growth beyond a cap trims coverage (logged), never correctness.
+const MAX_PROMPT_GETS = 6;
 const MAX_RESOURCE_READS = 6;
 
 // Capability key → methods the walk exercises. A capability advertised by the
@@ -62,6 +77,11 @@ function ok(host, check, detail = '') {
   console.log(`  ✔ [${host}] ${check}${detail ? ` — ${detail}` : ''}`);
 }
 
+// Fetch with a hard timeout spanning the WHOLE exchange including body read.
+// The AbortSignal is wired into fetch, so aborting mid-body rejects the
+// text() promise — clearing the timer only after the body is consumed is what
+// turns a stalled-body response into a fast HANG failure instead of a job
+// that idles until the workflow timeout.
 async function timedFetch(url, init = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -73,7 +93,8 @@ async function timedFetch(url, init = {}) {
       headers: { 'User-Agent': USER_AGENT, ...(init.headers ?? {}) },
       signal: controller.signal,
     });
-    return { res, ms: Date.now() - started };
+    const text = await res.text();
+    return { res, text, ms: Date.now() - started };
   } finally {
     clearTimeout(timer);
   }
@@ -81,22 +102,24 @@ async function timedFetch(url, init = {}) {
 
 let nextId = 1;
 // One JSON-RPC call. Returns the parsed result on success; records a failure
-// and returns null otherwise. `expect` lets the auth-wall probe assert a 401.
+// and returns null otherwise. `expectStatus: 401` is the auth-wall probe: it
+// asserts the origin's WWW-Authenticate challenge and deliberately skips body
+// parsing (see header comment).
 async function rpc(host, method, params, { expectStatus = 200, label } = {}) {
   const check = label ?? method;
   checks += 1;
   const id = method.startsWith('notifications/') ? undefined : nextId++;
   const payload = { jsonrpc: '2.0', method, params };
   if (id !== undefined) payload.id = id;
-  let res, ms;
+  let res, text, ms;
   try {
-    ({ res, ms } = await timedFetch(`${host}/mcp`, {
+    ({ res, text, ms } = await timedFetch(`${host}/mcp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(payload),
     }));
   } catch (err) {
-    fail(host, check, `HANG/transport error after ${TIMEOUT_MS}ms budget: ${err?.name ?? err}`);
+    fail(host, check, `HANG/transport error inside the ${TIMEOUT_MS}ms budget: ${err?.name ?? err}`);
     return null;
   }
   if (res.status !== expectStatus) {
@@ -104,22 +127,28 @@ async function rpc(host, method, params, { expectStatus = 200, label } = {}) {
     return null;
   }
   if (expectStatus === 202) { ok(host, check, `${ms}ms`); return {}; }
+  if (expectStatus === 401) {
+    if (!(res.headers.get('www-authenticate') ?? '').includes('Bearer')) {
+      fail(host, check, '401 lacks the WWW-Authenticate Bearer challenge — not the origin MCP auth wall (CDN-fabricated 401?)');
+      return null;
+    }
+    ok(host, check, `${ms}ms`);
+    return {};
+  }
   let body;
   try {
-    body = await res.json();
+    body = JSON.parse(text);
   } catch {
     fail(host, check, `HTTP ${res.status} but body is not JSON`);
     return null;
   }
-  if (expectStatus === 200) {
-    if (body.id !== id) {
-      fail(host, check, `response id ${JSON.stringify(body.id)} does not echo request id ${id} — uncorrelatable (#4937)`);
-      return null;
-    }
-    if (body.error) {
-      fail(host, check, `JSON-RPC error: ${JSON.stringify(body.error)}`);
-      return null;
-    }
+  if (body.id !== id) {
+    fail(host, check, `response id ${JSON.stringify(body.id)} does not echo request id ${id} — uncorrelatable (#4937)`);
+    return null;
+  }
+  if (body.error) {
+    fail(host, check, `JSON-RPC error: ${JSON.stringify(body.error)}`);
+    return null;
   }
   ok(host, check, `${ms}ms`);
   return body.result ?? body;
@@ -138,8 +167,11 @@ async function walkHost(host) {
   await rpc(host, 'notifications/initialized', undefined, { expectStatus: 202 });
   await rpc(host, 'ping', {});
 
-  // 2. Derived capability walk.
+  // 2. Derived capability walk. Catalog listings are fetched once per host
+  //    and reused by their sub-walks (request-budget discipline, see header).
   const capabilities = init.capabilities ?? {};
+  let promptsList = null;
+  let resourcesList = null;
   for (const capability of Object.keys(capabilities)) {
     if (!(capability in CAPABILITY_METHODS)) {
       checks += 1;
@@ -154,25 +186,35 @@ async function walkHost(host) {
         const r = await rpc(host, 'tools/list', {});
         if (r && !(Array.isArray(r.tools) && r.tools.length > 0)) fail(host, 'tools/list', 'empty catalog');
       } else if (method === 'prompts/list') {
-        const r = await rpc(host, 'prompts/list', {});
-        if (r && !(Array.isArray(r.prompts) && r.prompts.length > 0)) fail(host, 'prompts/list', 'empty catalog');
+        promptsList = await rpc(host, 'prompts/list', {});
+        if (promptsList && !(Array.isArray(promptsList.prompts) && promptsList.prompts.length > 0)) {
+          fail(host, 'prompts/list', 'empty catalog');
+        }
       } else if (method === 'prompts/get') {
-        const list = await rpc(host, 'prompts/list', {}, { label: 'prompts/list (for get walk)' });
-        for (const prompt of list?.prompts ?? []) {
+        const prompts = promptsList?.prompts ?? [];
+        for (const prompt of prompts.slice(0, MAX_PROMPT_GETS)) {
           const args = {};
           for (const a of prompt.arguments ?? []) if (a.required) args[a.name] = 'DE';
           await rpc(host, 'prompts/get', { name: prompt.name, arguments: args }, { label: `prompts/get(${prompt.name})` });
         }
+        if (prompts.length > MAX_PROMPT_GETS) {
+          console.log(`  ℹ [${host}] prompts/get walk capped at ${MAX_PROMPT_GETS} of ${prompts.length} prompts (request budget)`);
+        }
       } else if (method === 'resources/list') {
-        const r = await rpc(host, 'resources/list', {});
-        if (r && !(Array.isArray(r.resources) && r.resources.length > 0)) fail(host, 'resources/list', 'empty catalog');
+        resourcesList = await rpc(host, 'resources/list', {});
+        if (resourcesList && !(Array.isArray(resourcesList.resources) && resourcesList.resources.length > 0)) {
+          fail(host, 'resources/list', 'empty catalog');
+        }
       } else if (method === 'resources/templates/list') {
         const r = await rpc(host, 'resources/templates/list', {});
         if (r && !Array.isArray(r.resourceTemplates)) fail(host, 'resources/templates/list', 'missing resourceTemplates array');
       } else if (method === 'resources/read') {
-        const list = await rpc(host, 'resources/list', {}, { label: 'resources/list (for read walk)' });
-        for (const resource of (list?.resources ?? []).slice(0, MAX_RESOURCE_READS)) {
+        const resources = resourcesList?.resources ?? [];
+        for (const resource of resources.slice(0, MAX_RESOURCE_READS)) {
           await rpc(host, 'resources/read', { uri: resource.uri }, { label: `resources/read(${resource.uri})` });
+        }
+        if (resources.length > MAX_RESOURCE_READS) {
+          console.log(`  ℹ [${host}] resources/read walk capped at ${MAX_RESOURCE_READS} of ${resources.length} resources (request budget)`);
         }
       } else if (method === 'logging/setLevel') {
         await rpc(host, 'logging/setLevel', { level: 'info' });
@@ -180,8 +222,9 @@ async function walkHost(host) {
     }
   }
 
-  // 3. The auth wall must still answer — fast and with a 401, never a hang,
-  //    never a silent anonymous data leak (200).
+  // 3. The auth wall must still answer — fast, with the origin's 401 +
+  //    WWW-Authenticate challenge; never a hang, never a silent anonymous
+  //    data leak (200).
   await rpc(host, 'tools/call', { name: 'get_market_data', arguments: {} },
     { expectStatus: 401, label: 'tools/call (anon → 401 wall)' });
 
@@ -192,11 +235,11 @@ async function walkHost(host) {
   checks += 1;
   let meta;
   try {
-    const { res } = await timedFetch(`${host}/.well-known/oauth-authorization-server`, {
+    const { res, text } = await timedFetch(`${host}/.well-known/oauth-authorization-server`, {
       headers: { Accept: 'application/json' },
     });
     if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
-    meta = await res.json();
+    meta = JSON.parse(text);
     ok(host, 'oauth metadata', 'served');
   } catch (err) {
     fail(host, 'oauth metadata', `not served: ${err?.message ?? err}`);
