@@ -6,6 +6,7 @@ import {
   isMemeCandidate,
   tagRegions,
   parseYesPrice,
+  parseKalshiYesPrice,
   shouldInclude,
   scoreMarket,
   filterAndScore,
@@ -18,6 +19,29 @@ import {
 function market(title, yesPrice, volume, opts = {}) {
   return { title, yesPrice, volume, ...opts };
 }
+
+describe('parseKalshiYesPrice', () => {
+  it('converts 0-1 dollar scale to 0-100', () => {
+    assert.equal(parseKalshiYesPrice({ last_price_dollars: '0.62' }), 62);
+  });
+
+  it('returns null for a missing price instead of fabricating 50', () => {
+    assert.equal(parseKalshiYesPrice({}), null);
+  });
+
+  it('returns null for a non-numeric price instead of fabricating 50', () => {
+    assert.equal(parseKalshiYesPrice({ last_price_dollars: 'oops' }), null);
+  });
+
+  it('returns null for out-of-range prices', () => {
+    assert.equal(parseKalshiYesPrice({ last_price_dollars: '1.50' }), null);
+    assert.equal(parseKalshiYesPrice({ last_price_dollars: '-0.10' }), null);
+  });
+
+  it('keeps a genuine zero price (filtered downstream, not fabricated)', () => {
+    assert.equal(parseKalshiYesPrice({ last_price_dollars: '0' }), 0);
+  });
+});
 
 describe('parseYesPrice', () => {
   it('converts 0-1 scale to 0-100', () => {

@@ -44,6 +44,15 @@ export function parseYesPrice(market) {
   return null;
 }
 
+// Kalshi mirror of parseYesPrice: null for unreadable prices — a fabricated
+// default (e.g. 50) would flow downstream as a finite anchor and calibrate
+// forecasts against invented data.
+export function parseKalshiYesPrice(market) {
+  const p = parseFloat(market?.last_price_dollars);
+  if (!Number.isFinite(p) || p < 0 || p > 1) return null;
+  return +(p * 100).toFixed(1);
+}
+
 export function shouldInclude(m, relaxed = false) {
   const minPrice = relaxed ? 5 : 10;
   const maxPrice = relaxed ? 95 : 90;
