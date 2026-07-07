@@ -175,15 +175,25 @@ const FAMILY_FEED = {
   // whichever MARKET_INPUT_KEYS-backed calibration source is available.
 };
 
+// #5010: supply_chain (chokepoints:v4 riskScore) and gps (gpsjam:v2 hexCount) read
+// CURRENT-snapshot feeds with no per-record timeline, so a `sustained-48h` window
+// is unestablishable and forced a permanent VOID in the Bet-2 resolver. They now
+// emit an `at-deadline` point-read window the resolver can actually establish.
 const FAMILY_WINDOW = {
   conflict: 'within-horizon',
   ucdp_zone: 'within-horizon',
-  supply_chain: 'sustained-48h',
+  supply_chain: 'at-deadline',
   infrastructure: 'within-horizon',
   prediction_market: 'at-endDate',
-  gps: 'sustained-48h',
+  gps: 'at-deadline',
   market: 'within-horizon',
 };
+
+// #5010: the UCDP count threshold is prorated from the seeder's trailing window
+// (seed-ucdp-events.mjs TRAILING_WINDOW_MS = 365d) down to the forecast horizon,
+// so a within-horizon count is compared like-for-like instead of an annual tally
+// against a ~30d window (the Bet-2 F2/Q1 systematic-NO bias).
+const UCDP_TRAILING_WINDOW_DAYS = 365;
 
 // ── Commodity label -> future ticker (market family) ────────────────────
 //
@@ -345,10 +355,18 @@ function deriveHardMetrics(pred, family, inputs) {
       // forecast with only cii signals has no clean count metric -> judged.
       const count = firstFiniteSignalCount(pred, new Set(['ucdp', 'conflict_events']));
       if (!Number.isFinite(count)) return null;
+      // #5010: horizon-commensurable threshold. `count` is the detector's tally
+      // over the 365d trailing window; the resolver checks a within-horizon count,
+      // so prorate to the horizon (the expected event count if the trailing-year
+      // rate persists). Unknown horizon → null (deriveDeadline would throw anyway).
+      const horizonMs = HORIZON_MS[pred.timeHorizon];
+      if (!Number.isFinite(horizonMs)) return null;
+      const horizonDays = horizonMs / DAY_MS;
+      const proratedThreshold = Math.max(1, Math.round((count * horizonDays) / UCDP_TRAILING_WINDOW_DAYS));
       return {
         metricKey: `conflict:ucdp-events:v1|count(country==${pred.region})`,
         operator: '>=',
-        threshold: Math.max(1, Math.round(count)),
+        threshold: proratedThreshold,
         window: FAMILY_WINDOW[family],
       };
     }

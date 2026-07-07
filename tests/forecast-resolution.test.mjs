@@ -642,8 +642,9 @@ describe('FIX 1 — domain constrains the hard family (DOMAIN_TO_HARD_FAMILIES)'
     const forecast = pred({
       domain: 'conflict',
       region: 'Sudan',
+      timeHorizon: '30d',
       // cii emitted first (would shadow the count if it were accepted) — the
-      // threshold must come from the conflict_events count (3), not 71.
+      // threshold must come from the conflict_events count, not the cii 71.
       signals: [
         { type: 'cii', value: 'Sudan CII 71', weight: 0.4 },
         { type: 'conflict_events', value: '3 cross-border events', weight: 0.35 },
@@ -652,7 +653,60 @@ describe('FIX 1 — domain constrains the hard family (DOMAIN_TO_HARD_FAMILIES)'
     const spec = buildResolutionSpec(forecast, {}, GENERATED_AT);
     assert.equal(spec.kind, 'hard');
     assert.equal(spec.sourceFeed, 'conflict:ucdp-events:v1');
-    assert.equal(spec.threshold, 3);
+    // #5010: threshold is now horizon-prorated (was the raw 3). round(3*30/365)=0 → floor 1.
+    assert.equal(spec.threshold, 1);
+  });
+});
+
+describe('#5010 — resolution-spec emission amendment (horizon-commensurable count, resolvable supply/gps windows)', () => {
+  it('count threshold is prorated to the horizon, not the raw 365d tally', () => {
+    // count=365 (one/day over the trailing year) → expected 30 over a 30d horizon
+    const c30 = buildResolutionSpec(pred({
+      domain: 'conflict', region: 'Sudan', timeHorizon: '30d',
+      signals: [{ type: 'conflict_events', value: '365 events', weight: 0.35 }],
+    }), {}, GENERATED_AT);
+    assert.equal(c30.kind, 'hard');
+    assert.equal(c30.threshold, 30);
+    // same count, 7d horizon → expected 7
+    const c7 = buildResolutionSpec(pred({
+      domain: 'conflict', region: 'Sudan', timeHorizon: '7d',
+      signals: [{ type: 'conflict_events', value: '365 events', weight: 0.35 }],
+    }), {}, GENERATED_AT);
+    assert.equal(c7.threshold, 7);
+    // low count floors at 1 (round(10*30/365)=0 → 1)
+    const cLow = buildResolutionSpec(pred({
+      domain: 'conflict', region: 'Mali', timeHorizon: '30d',
+      signals: [{ type: 'ucdp', value: '10 UCDP events', weight: 0.5 }],
+    }), {}, GENERATED_AT);
+    assert.equal(cLow.threshold, 1);
+  });
+
+  it('supply_chain and gps windows are a point read (at-deadline), not sustained-48h', () => {
+    const sc = buildResolutionSpec(pred({
+      domain: 'supply_chain', region: 'Strait of Hormuz', timeHorizon: '7d',
+      signals: [{ type: 'chokepoint', value: 'disruption', weight: 0.5 }],
+    }), {}, GENERATED_AT);
+    assert.equal(sc.window, 'at-deadline');
+    assert.notEqual(sc.window, 'sustained-48h');
+
+    const gps = buildResolutionSpec(pred({
+      domain: 'supply_chain', region: 'Black Sea', timeHorizon: '7d',
+      signals: [{ type: 'gps_jamming', value: '12 jamming hexes', weight: 0.5 }],
+    }), {}, GENERATED_AT);
+    assert.equal(gps.window, 'at-deadline');
+  });
+
+  it('within-horizon families are unchanged (infra/market stay within-horizon; conflict stays within-horizon)', () => {
+    const infra = buildResolutionSpec(pred({
+      domain: 'infrastructure', region: 'Cuba', timeHorizon: '24h',
+      signals: [{ type: 'outage', value: '3 outages', weight: 0.5 }],
+    }), {}, GENERATED_AT);
+    assert.equal(infra.window, 'within-horizon');
+    const conflict = buildResolutionSpec(pred({
+      domain: 'conflict', region: 'Sudan', timeHorizon: '30d',
+      signals: [{ type: 'conflict_events', value: '40 events', weight: 0.35 }],
+    }), {}, GENERATED_AT);
+    assert.equal(conflict.window, 'within-horizon');
   });
 });
 
