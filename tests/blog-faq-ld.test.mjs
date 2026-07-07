@@ -39,13 +39,20 @@ describe('blog FAQPage JSON-LD extraction (#5001)', () => {
       '',
       'When missed events cost you money.',
       '',
-      '## Next section',
-      'not faq content',
+      '---',
+      '',
+      '**Pick your variant and start exploring:**',
+      '',
+      '- [worldmonitor.app](https://worldmonitor.app) for geopolitics',
     ].join('\n');
     const ld = extractFaqLd(body);
     assert.ok(ld, 'FAQPage LD must be produced');
     assert.equal(ld['@type'], 'FAQPage');
-    assert.equal(ld.mainEntity.length, 2);
+    assert.equal(
+      ld.mainEntity.length,
+      2,
+      'the bold CTA after the --- rule must NOT be extracted as a Question (corpus posts end FAQs with --- + CTA)',
+    );
     assert.equal(ld.mainEntity[0].name, 'Is the free tier usable?');
     assert.equal(
       ld.mainEntity[0].acceptedAnswer.text,
@@ -80,6 +87,13 @@ describe('blog FAQPage JSON-LD extraction (#5001)', () => {
       );
       for (const item of ld.mainEntity) {
         assert.ok(item.name.length > 0 && item.acceptedAnswer.text.length > 0, `${file}: empty Q or A extracted`);
+        // Every real FAQ question in the corpus ends with '?'; the bold
+        // takeaway/CTA paragraphs after the closing --- rule do not. If this
+        // fires, the extractor is running past the FAQ terminator again.
+        assert.ok(
+          item.name.endsWith('?'),
+          `${file}: extracted non-question "${item.name.slice(0, 60)}" — FAQ section terminator over-capture`,
+        );
       }
     }
     assert.ok(postsWithFaq > 0, 'expected at least one post with an FAQ section — the sweep is guarding nothing');
