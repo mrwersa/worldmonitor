@@ -2920,6 +2920,19 @@ export class GlobeMap {
   public triggerDatacenterClick(_id: string): void {}
   public triggerNuclearClick(_id: string): void {}
   public triggerIrradiatorClick(_id: string): void {}
+  // Rotate the globe so the chokepoint/waterway faces front, then open its popup
+  // once it has settled at container centre (pointOfView animates over ~1200ms).
+  public openChokepoint(id: string): void {
+    const waterway = STRATEGIC_WATERWAYS.find(w => w.id === id || w.chokepointId === id);
+    if (!waterway || !this.globe) return;
+    this.setCenter(waterway.lat, waterway.lon, 5);
+    const rect = this.container.getBoundingClientRect();
+    const x = rect.width / 2;
+    const y = rect.height / 2;
+    window.setTimeout(() => {
+      this.popup?.show({ type: 'waterway', data: waterway, x, y });
+    }, 1200);
+  }
   public fitCountry(code: string): void {
     if (!this.globe) return;
     const bbox = getCountryBbox(code);

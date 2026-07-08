@@ -47,6 +47,28 @@ describe('parseMapUrlState expanded param', () => {
   });
 });
 
+describe('parseMapUrlState chokepoint param', () => {
+  it('parses a canonical chokepoint id', () => {
+    const state = parseMapUrlState('?chokepoint=bab_el_mandeb', EMPTY_LAYERS);
+    assert.equal(state.chokepoint, 'bab_el_mandeb');
+  });
+
+  it('lowercases the chokepoint id', () => {
+    const state = parseMapUrlState('?chokepoint=Hormuz_Strait', EMPTY_LAYERS);
+    assert.equal(state.chokepoint, 'hormuz_strait');
+  });
+
+  it('rejects malformed or oversized chokepoint ids', () => {
+    assert.equal(parseMapUrlState('?chokepoint=', EMPTY_LAYERS).chokepoint, undefined);
+    assert.equal(parseMapUrlState('?chokepoint=../etc/passwd', EMPTY_LAYERS).chokepoint, undefined);
+    assert.equal(parseMapUrlState(`?chokepoint=${'a'.repeat(60)}`, EMPTY_LAYERS).chokepoint, undefined);
+  });
+
+  it('leaves chokepoint undefined when absent', () => {
+    assert.equal(parseMapUrlState('?country=IR', EMPTY_LAYERS).chokepoint, undefined);
+  });
+});
+
 describe('buildMapUrl expanded param', () => {
   const base = 'https://worldmonitor.app/dashboard';
   const baseState = {

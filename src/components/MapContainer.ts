@@ -1317,6 +1317,18 @@ export class MapContainer {
     }
   }
 
+  // Pan/rotate to a chokepoint and open its waterway popup. Unlike the trigger*
+  // clicks above, globe is a real target here (it pans the point to front-centre).
+  public openChokepoint(id: string): void {
+    if (this.useGlobe) {
+      this.globeMap?.openChokepoint(id);
+    } else if (this.useDeckGL) {
+      this.deckGLMap?.openChokepoint(id);
+    } else {
+      this.svgMap?.openChokepoint(id);
+    }
+  }
+
   public flashLocation(lat: number, lon: number, durationMs?: number): void {
     if (this.useGlobe) { this.globeMap?.flashLocation(lat, lon, durationMs); return; }
     if (this.useDeckGL) {
