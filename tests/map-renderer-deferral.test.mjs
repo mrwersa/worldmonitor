@@ -161,6 +161,14 @@ function mapContainerClass(sourceFile) {
   return cls;
 }
 
+function findClass(sourceFile, className) {
+  const cls = sourceFile.statements.find((statement) => (
+    ts.isClassDeclaration(statement) && statement.name?.text === className
+  ));
+  assert.ok(cls, `${className} class should exist`);
+  return cls;
+}
+
 function classMemberNames(cls) {
   return new Set(cls.members
     .filter((member) => ts.isPropertyDeclaration(member) || ts.isMethodDeclaration(member))
@@ -378,6 +386,22 @@ describe('map renderer deferral boundary', () => {
       /this\.pendingChokepointOpen\s*!==\s*null[\s\S]*this\.openChokepoint\(pendingChokepointOpen\)/,
       'rehydrateActiveMap should replay a queued chokepoint open after renderer creation',
     );
+  });
+
+  // The MapContainer queue only covers "no renderer object yet". A deferred
+  // renderer object can exist while its underlying map (DeckGL maplibreMap /
+  // GlobeMap globe) is still being built asynchronously — rehydrateActiveMap
+  // replays the queued open *before* createDeckGLMap awaits whenReady(). Each
+  // renderer's setCenter no-ops until its map exists, so openChokepoint must
+  // defer the pan+popup until it is ready rather than dropping it silently.
+  it('defers chokepoint opens in the async WebGL/globe renderers until their map is built', () => {
+    const deckBody = methodBodyText(findClass(parseSource('src/components/DeckGLMap.ts'), 'DeckGLMap'), 'openChokepoint');
+    assert.match(deckBody, /this\.maplibreMap/, 'DeckGLMap.openChokepoint should gate on maplibreMap readiness');
+    assert.match(deckBody, /whenReady\(\)/, 'DeckGLMap.openChokepoint should defer until whenReady() when maplibreMap is not built yet');
+
+    const globeBody = methodBodyText(findClass(parseSource('src/components/GlobeMap.ts'), 'GlobeMap'), 'openChokepoint');
+    assert.match(globeBody, /this\.globe/, 'GlobeMap.openChokepoint should gate on globe readiness');
+    assert.match(globeBody, /whenReady\(\)/, 'GlobeMap.openChokepoint should defer until whenReady() when the globe is not built yet');
   });
 
   it('gates desktop DeckGL startup behind viewport idle or first interaction', () => {
