@@ -17,6 +17,8 @@
  */
 
 import { loadEnvFile, CHROME_UA, runSeed, writeExtraKeyWithMeta, sleep, loadSharedConfig } from './_seed-utils.mjs';
+import { fetchGdeltJson } from './_gdelt-fetch.mjs';
+import { buildGdeltConflictUrl, mapGdeltArticlesToEvents, GDELT_COUNTRY_NAMES } from './_conflict-gdelt.mjs';
 
 loadEnvFile(import.meta.url);
 
@@ -100,6 +102,10 @@ async function fetchAcledEvents() {
       id: `acled-${e.event_id_cnty}`,
       eventType: e.event_type || '',
       country: e.country || '',
+      // event_date ('YYYY-MM-DD') is the field the EMA engine reads
+      // (_ema-threat-engine.mjs:71 `Date.parse(ev.event_date)`); without it,
+      // ACLED events were parsed as NaN and never counted.
+      event_date: e.event_date || '',
       location: { latitude: parseFloat(e.latitude || '0'), longitude: parseFloat(e.longitude || '0') },
       occurredAt: new Date(e.event_date || '').getTime(),
       fatalities: parseInt(e.fatalities || '', 10) || 0,
@@ -110,6 +116,43 @@ async function fetchAcledEvents() {
 
   console.log(`  ACLED: ${events.length} events (${startDate} to ${endDate})`);
   return { events, pagination: undefined };
+}
+
+// ─── GDELT conflict-events fallback (used when ACLED has no credentials) ───
+// ACLED requires a registered account. When its credentials are absent, keep a
+// near-real-time conflict signal by proxying GDELT DOC 2.0 coverage volume: per
+// priority country, count recent conflict-tagged articles and emit them as synthetic
+// events in the SAME {country, event_date} shape the EMA engine reads
+// (_ema-threat-engine.mjs). Article volume is a coarser proxy than ACLED event counts,
+// but it is keyless, near-real-time, and directionally valid for the per-country
+// escalation EMA. URL/query + article→event mapping live in the import-safe,
+// unit-tested _conflict-gdelt.mjs; this fn owns the throttle-aware fetch via
+// fetchGdeltJson's proxy path (GDELT is per-IP 429-throttled).
+async function fetchGdeltCountryEvents(cc) {
+  if (!GDELT_COUNTRY_NAMES[cc]) return [];
+  let data;
+  try {
+    // Runs 20× per cycle — keep each call cheap so the whole sweep fits the run window.
+    data = await fetchGdeltJson(buildGdeltConflictUrl(cc), { label: `conflict:${cc}`, maxRetries: 1, proxyMaxAttempts: 2 });
+  } catch (e) {
+    console.warn(`  GDELT ${cc}: ${e.message}`);
+    return [];
+  }
+  return mapGdeltArticlesToEvents(data?.articles, cc);
+}
+
+async function fetchGdeltConflictEvents() {
+  const events = [];
+  let ok = 0;
+  const CONCURRENCY = 4; // bound the run window (20 countries × proxy retries)
+  for (let i = 0; i < CONFLICT_COUNTRIES.length; i += CONCURRENCY) {
+    const batch = CONFLICT_COUNTRIES.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(batch.map(fetchGdeltCountryEvents));
+    for (const evs of results) { if (evs.length) ok += 1; events.push(...evs); }
+    await sleep(500);
+  }
+  console.log(`  GDELT conflict-events (ACLED fallback): ${events.length} events across ${ok}/${CONFLICT_COUNTRIES.length} countries`);
+  return { events, pagination: undefined, source: 'gdelt' };
 }
 
 // ─── Humanitarian Summary (HAPI) ───
@@ -262,14 +305,25 @@ async function fetchAll() {
   if (pizzint.status === 'rejected') console.warn(`  PizzINT failed: ${pizzint.reason?.message || pizzint.reason}`);
   if (gdelt.status === 'rejected') console.warn(`  GDELT failed: ${gdelt.reason?.message || gdelt.reason}`);
 
-  if (!ac && !ha && !pi) throw new Error('All conflict/intel fetches failed');
+  // Primary conflict-events feed: ACLED when credentialed, else the GDELT
+  // article-volume proxy so the conflict EMA is never left signal-blind.
+  let primary = ac;
+  if (!primary?.events?.length) {
+    const gdeltEvents = await fetchGdeltConflictEvents().catch((e) => {
+      console.warn(`  GDELT conflict-events fallback failed: ${e.message}`);
+      return null;
+    });
+    if (gdeltEvents?.events?.length) primary = gdeltEvents;
+  }
+
+  if (!primary?.events?.length && !ha && !pi) throw new Error('All conflict/intel fetches failed');
 
   // Write secondary keys BEFORE returning (runSeed calls process.exit after primary write)
   if (ha) { for (const [cc, data] of Object.entries(ha)) await writeExtraKeyWithMeta(`${HAPI_CACHE_KEY_PREFIX}:${cc}`, data, HAPI_TTL, 1); }
   if (pi) await writeExtraKeyWithMeta('intel:pizzint:v1:base', { pizzint: pi, tensionPairs: [] }, PIZZINT_TTL, pi.locationsMonitored ?? 0);
   if (pi && gd) await writeExtraKeyWithMeta('intel:pizzint:v1:gdelt', { pizzint: pi, tensionPairs: gd }, PIZZINT_TTL, gd.length ?? 0);
 
-  return ac || { events: [], pagination: undefined };
+  return primary || { events: [], pagination: undefined };
 }
 
 function validate(data) {
@@ -283,7 +337,7 @@ export function declareRecords(data) {
 runSeed('conflict', 'acled-intel', ACLED_CACHE_KEY, fetchAll, {
   validateFn: validate,
   ttlSeconds: ACLED_TTL,
-  sourceVersion: 'acled-hapi-pizzint',
+  sourceVersion: 'acled-or-gdelt-hapi-pizzint',
   declareRecords,
   schemaVersion: 1,
   maxStaleMin: 38,

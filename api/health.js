@@ -261,6 +261,7 @@ const SEED_META = {
   oceanIce:         { key: 'seed-meta:climate:ocean-ice',       maxStaleMin: 2880 }, // daily cron at 08:00 UTC; 48h = 2× interval, tolerates one missed run
   climateNews:      { key: 'seed-meta:climate:news-intelligence', maxStaleMin: 90 }, // relay loop every 30min; 90 = 3× interval
   unrestEvents:     { key: 'seed-meta:unrest:events',           maxStaleMin: 120 }, // 45min cron; 120 = 2h grace (was 75 = 30min buffer, too tight)
+  conflictAcled:    { key: 'seed-meta:conflict:acled-intel',    maxStaleMin: 45 }, // */15 cron (ACLED or GDELT-fallback conflict events → conflict:acled:v1:all:0:0, the EMA input); 45 = 3× interval. Was UNMONITORED, so an empty conflict-events feed (missing ACLED creds) went silent — #5099.
   cyberThreats:     { key: 'seed-meta:cyber:threats',           maxStaleMin: 240 }, // 2h interval; 240min = 2x interval
   cryptoQuotes:     { key: 'seed-meta:market:crypto',           maxStaleMin: 30 },
   etfFlows:         { key: 'seed-meta:market:etf-flows',        maxStaleMin: 60 },
