@@ -149,7 +149,7 @@ async function fetchGdeltConflictEvents() {
     const batch = CONFLICT_COUNTRIES.slice(i, i + CONCURRENCY);
     const results = await Promise.all(batch.map(fetchGdeltCountryEvents));
     for (const evs of results) { if (evs.length) ok += 1; events.push(...evs); }
-    await sleep(500);
+    if (i + CONCURRENCY < CONFLICT_COUNTRIES.length) await sleep(500); // inter-batch only; no trailing wait
   }
   console.log(`  GDELT conflict-events (ACLED fallback): ${events.length} events across ${ok}/${CONFLICT_COUNTRIES.length} countries`);
   return { events, pagination: undefined, source: 'gdelt' };
@@ -307,8 +307,11 @@ async function fetchAll() {
 
   // Primary conflict-events feed: ACLED when credentialed, else the GDELT
   // article-volume proxy so the conflict EMA is never left signal-blind.
+  // Fall back ONLY when ACLED is unavailable (ac === null: no credentials OR the
+  // fetch rejected) — NOT when a credentialed ACLED legitimately returned an empty
+  // set (a genuine quiet period), which GDELT article volume would wrongly inflate.
   let primary = ac;
-  if (!primary?.events?.length) {
+  if (!ac) {
     const gdeltEvents = await fetchGdeltConflictEvents().catch((e) => {
       console.warn(`  GDELT conflict-events fallback failed: ${e.message}`);
       return null;
