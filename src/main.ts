@@ -1,14 +1,21 @@
 import './styles/base-layer.css';
-import './styles/happy-theme.css';
 import './bootstrap/zod-csp';
+import { SITE_VARIANT } from '@/config/variant';
 import { installLcpAttributionDebug } from '@/bootstrap/lcp-attribution';
 import { markLcpDebug } from '@/utils/lcp-debug';
 import { enqueueSentryCall, installPreInitErrorQueue, scheduleSentryInit } from '@/bootstrap/sentry-defer';
 import { registerClsReporting } from '@/bootstrap/cls-report';
 import { registerInpReporting } from '@/bootstrap/inp-report';
+import { registerLcpReporting } from '@/bootstrap/lcp-report';
 import { initVercelAnalytics } from '@/bootstrap/secondary-startup';
 import { App } from './App';
 import { installUtmInterceptor } from './utils/utm';
+
+if (SITE_VARIANT === 'happy') {
+  // Keeps happy-theme.css off other variants' eager CSS graph. On happy, the
+  // stylesheet applies asynchronously, so a brief base-theme flash is possible.
+  void import('./styles/happy-theme.css');
+}
 
 // Activate the deferred dashboard app stylesheet. The build
 // (deferDashboardStylesheetLinks in vite.config.ts) emits the large dashboard
@@ -48,6 +55,10 @@ registerInpReporting();
 // Report field CLS attribution to Sentry so field-only layout shifts can name
 // their largest shifting element before we scope the layout fix (#4580).
 registerClsReporting();
+
+// Report field LCP attribution to Sentry so the last-mile render-delay work can
+// see the real LCP element plus TTFB / load-delay / load-time / render-delay parts (#5079).
+registerLcpReporting();
 
 // Suppress NotAllowedError from YouTube IFrame API's internal play() — browser autoplay policy,
 // not actionable. The YT IFrame API doesn't expose the play() promise so it leaks as unhandled.
@@ -356,17 +367,19 @@ import { loadDesktopSecrets } from '@/services/runtime-config';
 import { applyStoredTheme } from '@/utils/theme-manager';
 import { applyFont } from '@/services/font-settings';
 import { initAnalytics } from '@/services/analytics';
-import { SITE_VARIANT } from '@/config/variant';
 import { clearChunkReloadGuard, installChunkReloadGuard } from '@/bootstrap/chunk-reload';
+import { initDebugBearRum } from '@/bootstrap/debugbear-rum';
 import { installStaleBundleCheck } from '@/bootstrap/stale-bundle-check';
 import { installSwUpdateHandler } from '@/bootstrap/sw-update';
 
 // Auto-reload on stale chunk 404s after deployment (Vite fires this for modulepreload failures).
 const chunkReloadStorageKey = installChunkReloadGuard(__APP_VERSION__);
 
-// Analytics are secondary startup work: schedule loaders after first paint.
+// Product analytics are secondary startup work; RUM starts once the trusted
+// dashboard entry executes so it can observe page-load vitals.
 void initAnalytics();
 initVercelAnalytics();
+initDebugBearRum();
 
 // Initialize dynamic meta tags for sharing
 initMetaTags();

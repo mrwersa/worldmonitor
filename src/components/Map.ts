@@ -887,16 +887,6 @@ export class MapComponent {
       );
     };
 
-    // Resume mobile label-overlap measurement on the first direct map interaction.
-    // Mobile-only: on desktop the flag is always armed, so this would only ever
-    // early-return inside resumeMobileLabelVisibility().
-    if (this.isMobile) {
-      this.container.addEventListener('pointerdown', (e) => {
-        if (shouldIgnoreInteractionStart(e.target)) return;
-        this.resumeMobileLabelVisibility();
-      }, { signal });
-    }
-
     // Wheel zoom with smooth delta
     this.container.addEventListener(
       'wheel',
@@ -967,9 +957,10 @@ export class MapComponent {
     const touchHistory: Array<{ x: number; y: number; t: number }> = [];
     let inertiaRaf = 0;
 
+    // Keep tap starts out of the label-collision pass; arm it only once the
+    // gesture actually moves/zooms the viewport.
     this.container.addEventListener('touchstart', (e) => {
       if (shouldIgnoreInteractionStart(e.target)) return;
-      this.resumeMobileLabelVisibility();
       cancelAnimationFrame(inertiaRaf);
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -1019,6 +1010,7 @@ export class MapComponent {
         this.state.pan.y += (center.y - lastTouchCenter.y) * panSpeed;
         lastTouchCenter = center;
 
+        this.resumeMobileLabelVisibility();
         this.applyTransform();
       } else if (e.touches.length === 1 && isDragging && touch1) {
         if (!touchDragActive) {
@@ -1026,6 +1018,7 @@ export class MapComponent {
           const dy0 = touch1.clientY - touchStartPos.y;
           if (Math.hypot(dx0, dy0) < TOUCH_DRAG_THRESHOLD) return;
           touchDragActive = true;
+          this.resumeMobileLabelVisibility();
         }
 
         e.preventDefault();
@@ -3644,7 +3637,17 @@ export class MapComponent {
   }
 
   public flashLocation(lat: number, lon: number, durationMs = 2000): void {
-    const { width, height } = this.readContainerSize();
+    // flashMapForNews() flashes the map once per matching news item, firing in
+    // bursts across load passes (hundreds of calls shortly after load) against a
+    // container whose size is not changing. A live clientWidth/clientHeight read
+    // here forced a synchronous layout of the whole base-map SVG on every call
+    // (~75ms across the load in the authenticated DebugBear trace — the dominant
+    // Map forced-reflow, #5049 / tail of #5017/#5022). Route through the
+    // ResizeObserver-maintained cache
+    // instead; it falls back to a live read only while the cache is empty
+    // (first paint). This is the draw/render path, not a one-shot viewport
+    // command, so the cache is the correct source (#5022).
+    const { width, height } = this.getKnownContainerSize();
     if (!width || !height) return;
 
     const projection = this.getProjection(width, height);
@@ -3903,6 +3906,19 @@ export class MapComponent {
       x: pos[0],
       y: pos[1],
     });
+  }
+
+  // Pan to a chokepoint/waterway and open its popup (chokepoint deep-link target).
+  // Pans first so the waterway lands at the container centre, where the popup is
+  // anchored — unlike the trigger* methods which project in place.
+  public openChokepoint(id: string): void {
+    if (this.destroyed) return;
+    const waterway = STRATEGIC_WATERWAYS.find(w => w.id === id || w.chokepointId === id);
+    if (!waterway) return;
+    this.setCenter(waterway.lat, waterway.lon);
+    this.setZoom(5);
+    const { width, height } = this.readContainerSize();
+    this.popup.show({ type: 'waterway', data: waterway, x: width / 2, y: height / 2 });
   }
 
   public triggerDatacenterClick(id: string): void {
@@ -4175,6 +4191,7 @@ export class MapComponent {
     if (!topLeft || !bottomRight) {
       this.state.zoom = 4;
       this.setCenter(midLat, midLon);
+      this.resumeMobileLabelVisibility();
       return;
     }
     const pxWidth = Math.abs(bottomRight[0] - topLeft[0]);
@@ -4184,6 +4201,7 @@ export class MapComponent {
     const zoomY = pxHeight > 0 ? (height * padFactor) / pxHeight : 4;
     this.state.zoom = Math.max(1, Math.min(8, Math.min(zoomX, zoomY)));
     this.setCenter(midLat, midLon);
+    this.resumeMobileLabelVisibility();
   }
 
   public getState(): MapState {

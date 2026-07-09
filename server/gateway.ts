@@ -21,6 +21,7 @@ import { mapErrorToResponse } from './error-mapper';
 import { checkRateLimit, checkEndpointRateLimit, hasEndpointRatePolicy } from './_shared/rate-limit';
 import { drainResponseHeaders, drainSuccessStatusOverride } from './_shared/response-headers';
 import { projectJsonResponse } from './_shared/response-projection';
+import { getRpcNoStoreReasonFromJson } from './_shared/cache-contract';
 import { checkEntitlementDetailed, getRequiredTier, getEntitlements, type CachedEntitlements } from './_shared/entitlement-check';
 import { resolveClerkSession } from './_shared/auth-session';
 import {
@@ -404,6 +405,7 @@ export const PUBLIC_NO_AUTH_RPC_PATHS = new Set<string>([
 export const RELAY_WARM_PING_PATHS = new Set<string>([
   '/api/infrastructure/v1/list-service-statuses',
   '/api/infrastructure/v1/get-cable-health',
+  '/api/infrastructure/v1/list-temporal-anomalies',
   '/api/intelligence/v1/get-risk-scores',
   '/api/supply-chain/v1/get-chokepoint-status',
 ]);
@@ -1469,7 +1471,7 @@ export function createDomainGateway(
                 headers: {
                   'Content-Type': 'application/json',
                   'Cache-Control': 'no-store',
-                  ...rateLimitHeaders({ limit: burst.limit, remaining: 0, resetMs: burst.reset, retryAfterSec }),
+                  ...rateLimitHeaders({ limit: burst.limit, remaining: 0, resetMs: burst.reset, retryAfterSec, windowSec: 60 }),
                   ...corsHeaders,
                 },
               });
@@ -1496,6 +1498,8 @@ export function createDomainGateway(
                       remaining: 0,
                       resetMs: Date.now() + meter.retryAfterSec * 1000,
                       retryAfterSec: meter.retryAfterSec,
+                      // Daily ceiling window (24 h) for the advertised policy.
+                      windowSec: 86_400,
                     }),
                     ...corsHeaders,
                   },
@@ -1626,33 +1630,10 @@ export function createDomainGateway(
     if (response.status === 200 && request.method === 'GET' && response.body) {
       const bodyBytes = await response.arrayBuffer();
 
-      // Skip CDN caching for upstream-unavailable / empty responses so CF
-      // doesn't serve stale error data for hours.
-      //
-      // Three field names are in active use across the RPC handlers because the
-      // codebase grew three fallback conventions in parallel:
-      //   - `upstreamUnavailable: true` — used by consumer-prices/intelligence/
-      //     trade handlers that return ad-hoc JSON shapes.
-      //   - `unavailable: true` — proto-typed handlers (every economic RPC
-      //     including get-macro-signals — `bool unavailable = N` in the proto).
-      //   - `dataAvailable: false` — seed-backed handlers that distinguish
-      //     a real empty snapshot from a degraded or missing seed.
-      // The original check only matched the first form, so proto-typed
-      // fallback responses were getting full `medium` cache tier (CF s-maxage
-      // 1200s, browser max-age 1800s). Production incident 2026-05-03: a
-      // 30-min window of auth bug (PR #3541's wm-session interceptor) caused
-      // every macroSignals RPC to return the fallback. Those responses got
-      // cached for 30 min. Even after auth was fixed (PR #3574), browsers
-      // and CF POPs kept serving "Upstream API unavailable" until the cache
-      // TTL expired naturally — 30 min of false-bad UX per affected user.
-      // Detecting all three field names closes that window.
       const bodyStr = new TextDecoder().decode(bodyBytes);
-      const isUpstreamUnavailable =
-        bodyStr.includes('"upstreamUnavailable":true') ||
-        bodyStr.includes('"unavailable":true') ||
-        bodyStr.includes('"dataAvailable":false');
+      const noStoreReason = getRpcNoStoreReasonFromJson(bodyStr, { pathname });
 
-      if (mergedHeaders.get('X-No-Cache') || isUpstreamUnavailable) {
+      if (mergedHeaders.get('X-No-Cache') || noStoreReason) {
         mergedHeaders.set('Cache-Control', 'no-store');
         mergedHeaders.delete('CDN-Cache-Control');
         mergedHeaders.delete('Vercel-CDN-Cache-Control');
