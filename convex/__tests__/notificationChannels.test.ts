@@ -17,7 +17,11 @@ async function seedEntitlement(
   validUntil = Date.now() + 30 * 24 * 60 * 60 * 1000,
 ) {
   await t.run(async (ctx) => {
-    await ctx.db.insert("entitlements", {
+    const existing = await ctx.db
+      .query("entitlements")
+      .withIndex("by_userId", (q) => q.eq("userId", USER.subject))
+      .unique();
+    const entitlement = {
       userId: USER.subject,
       planKey: tier >= 1 ? "pro_monthly" : "free",
       features: {
@@ -30,12 +34,17 @@ async function seedEntitlement(
       },
       validUntil,
       updatedAt: Date.now(),
-    });
+    };
+    if (existing) {
+      await ctx.db.replace(existing._id, entitlement);
+    } else {
+      await ctx.db.insert("entitlements", entitlement);
+    }
   });
 }
 
 describe("notificationChannels — Convex entitlement gate", () => {
-  test.each([
+  const guardedMutations: Array<[string, (asUser: TestUser) => Promise<unknown>]> = [
     ["setChannel", (asUser: TestUser) =>
       asUser.mutation(api.notificationChannels.setChannel, {
         channelType: "email",
@@ -53,42 +62,62 @@ describe("notificationChannels — Convex entitlement gate", () => {
       asUser.mutation(api.notificationChannels.createPairingToken, {
         variant: "full",
       })],
-  ])("%s rejects an authenticated free-tier caller", async (_name, invoke) => {
-    const t = convexTest(schema, modules);
-    const asFreeUser = t.withIdentity(USER);
+  ];
 
-    await expect(invoke(asFreeUser)).rejects.toThrow(
-      /PRO_REQUIRED|Notifications are a PRO feature/i,
+  describe.each([
+    ["missing", async (_t: ReturnType<typeof convexTest>) => {
+      // Intentionally leave the entitlement table empty.
+    }],
+    ["expired", (t: ReturnType<typeof convexTest>) =>
+      seedEntitlement(t, 1, Date.now() - 1_000)],
+    ["tier-0", (t: ReturnType<typeof convexTest>) => seedEntitlement(t, 0)],
+  ])("%s entitlement", (_entitlementState, arrangeEntitlement) => {
+    test.each(guardedMutations)(
+      "%s rejects an authenticated non-Pro caller",
+      async (_name, invoke) => {
+        const t = convexTest(schema, modules);
+        await arrangeEntitlement(t);
+        const asUser = t.withIdentity(USER);
+
+        await expect(invoke(asUser)).rejects.toThrow(
+          /PRO_REQUIRED|Notifications are a PRO feature/i,
+        );
+      },
     );
   });
 
-  test("setChannel rejects an expired PRO entitlement", async () => {
+  test("claimPairingToken rejects a token whose owner is no longer Pro", async () => {
     const t = convexTest(schema, modules);
+    await seedEntitlement(t);
+    const asProUser = t.withIdentity(USER);
+    const pairing = await asProUser.mutation(
+      api.notificationChannels.createPairingToken,
+      { variant: "full" },
+    );
     await seedEntitlement(t, 1, Date.now() - 1_000);
-    const asExpiredUser = t.withIdentity(USER);
 
     await expect(
-      asExpiredUser.mutation(api.notificationChannels.setChannel, {
-        channelType: "email",
-        email: "expired-user@example.com",
+      t.mutation(api.notificationChannels.claimPairingToken, {
+        token: pairing.token,
+        chatId: "12345",
       }),
-    ).rejects.toThrow(/PRO_REQUIRED|Notifications are a PRO feature/i);
+    ).resolves.toEqual({ ok: false, reason: "PRO_REQUIRED" });
+
+    const state = await t.run(async (ctx) => ({
+      token: await ctx.db
+        .query("telegramPairingTokens")
+        .withIndex("by_token", (q) => q.eq("token", pairing.token))
+        .unique(),
+      channels: await ctx.db
+        .query("notificationChannels")
+        .withIndex("by_user", (q) => q.eq("userId", USER.subject))
+        .collect(),
+    }));
+    expect(state.token?.used).toBe(false);
+    expect(state.channels).toEqual([]);
   });
 
-  test("setChannel rejects an explicit tier-0 entitlement", async () => {
-    const t = convexTest(schema, modules);
-    await seedEntitlement(t, 0);
-    const asFreeUser = t.withIdentity(USER);
-
-    await expect(
-      asFreeUser.mutation(api.notificationChannels.setChannel, {
-        channelType: "email",
-        email: "tier-zero-user@example.com",
-      }),
-    ).rejects.toThrow(/PRO_REQUIRED|Notifications are a PRO feature/i);
-  });
-
-  test("PRO callers retain access to all four public mutations", async () => {
+  test("PRO callers retain access to every entitlement-gated public mutation", async () => {
     const t = convexTest(schema, modules);
     await seedEntitlement(t);
     const asProUser = t.withIdentity(USER);
@@ -107,9 +136,19 @@ describe("notificationChannels — Convex entitlement gate", () => {
       api.notificationChannels.createPairingToken,
       { variant: "full" },
     );
+    const claimed = await t.mutation(
+      api.notificationChannels.claimPairingToken,
+      { token: pairing.token, chatId: "12345" },
+    );
 
-    await expect(asProUser.query(api.notificationChannels.getChannels, {}))
-      .resolves.toEqual([]);
+    const channels = await asProUser.query(
+      api.notificationChannels.getChannels,
+      {},
+    );
     expect(pairing.token).toHaveLength(43);
+    expect(claimed).toEqual({ ok: true, reason: null });
+    expect(channels).toMatchObject([
+      { channelType: "telegram", chatId: "12345", verified: true },
+    ]);
   });
 });

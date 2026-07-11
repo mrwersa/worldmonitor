@@ -12,10 +12,10 @@ import { channelTypeValidator } from "./constants";
  * Notifications are a PRO feature. Enforce the entitlement at the public
  * Convex write boundary so callers cannot bypass the edge API gate.
  */
-async function assertProEntitlement(
+async function hasProEntitlement(
   ctx: MutationCtx,
   userId: string,
-): Promise<void> {
+): Promise<boolean> {
   const entitlement = await ctx.db
     .query("entitlements")
     .withIndex("by_userId", (q) => q.eq("userId", userId))
@@ -24,7 +24,14 @@ async function assertProEntitlement(
     entitlement && entitlement.validUntil >= Date.now()
       ? entitlement.features.tier
       : 0;
-  if (tier < 1) {
+  return tier >= 1;
+}
+
+async function assertProEntitlement(
+  ctx: MutationCtx,
+  userId: string,
+): Promise<void> {
+  if (!(await hasProEntitlement(ctx, userId))) {
     throw new ConvexError({
       code: "PRO_REQUIRED",
       message:
@@ -470,6 +477,9 @@ export const claimPairingToken = mutation({
     if (!record) return { ok: false, reason: "NOT_FOUND" as const };
     if (record.used) return { ok: false, reason: "ALREADY_USED" as const };
     if (record.expiresAt < Date.now()) return { ok: false, reason: "EXPIRED" as const };
+    if (!(await hasProEntitlement(ctx, record.userId))) {
+      return { ok: false, reason: "PRO_REQUIRED" as const };
+    }
 
     // Mark token used
     await ctx.db.patch(record._id, { used: true });

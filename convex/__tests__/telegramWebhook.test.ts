@@ -21,6 +21,20 @@ const PAIRING_TOKEN = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"; // 43 chars
 
 async function seedPairingToken(t: ReturnType<typeof convexTest>) {
   await t.run(async (ctx) => {
+    await ctx.db.insert("entitlements", {
+      userId: USER_ID,
+      planKey: "pro_monthly",
+      features: {
+        tier: 1,
+        maxDashboards: 10,
+        apiAccess: true,
+        apiRateLimit: 1000,
+        prioritySupport: true,
+        exportFormats: ["json", "csv"],
+      },
+      validUntil: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      updatedAt: Date.now(),
+    });
     await ctx.db.insert("telegramPairingTokens", {
       userId: USER_ID,
       token: PAIRING_TOKEN,
