@@ -1120,7 +1120,7 @@ export class App {
     // the XOR flip happens BEFORE the epoch claim so every rapid Cmd+K still
     // counts (odd → open, even → cancel), even the ones that get superseded.
     let epoch = this.openSearchEpoch;
-    const historyEpoch = ++this.openSearchHistoryEpoch;
+    const historyEpoch = options.historyPending ? ++this.openSearchHistoryEpoch : this.openSearchHistoryEpoch;
     const pendingId = 'search-pending';
     if (options.historyPending) {
       const cancel = () => {
@@ -1132,7 +1132,7 @@ export class App {
     }
     try {
       await this.waitForUiReady();
-      if (this.openSearchHistoryEpoch !== historyEpoch) return;
+      if (options.historyPending && this.openSearchHistoryEpoch !== historyEpoch) return;
 
       const existingModal = this.state.searchModal;
       if (options.toggle && existingModal?.isOpen()) {
@@ -1148,7 +1148,7 @@ export class App {
       epoch = ++this.openSearchEpoch;
       const manager = await this.ensureSearchManager();
       if (this.openSearchEpoch !== epoch) return;
-      if (this.openSearchHistoryEpoch !== historyEpoch) return;
+      if (options.historyPending && this.openSearchHistoryEpoch !== historyEpoch) return;
       if (options.historyPending && overlayHistory.top() !== pendingId) return;
 
       const wantOpen = togglingBeforeLoad ? this.searchToggleDesiredOpen : true;

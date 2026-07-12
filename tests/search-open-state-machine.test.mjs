@@ -65,6 +65,7 @@ function makeInstance({ failLoad = false } = {}) {
   let resolveGate, rejectGate;
   const gate = new Promise((res, rej) => { resolveGate = res; rejectGate = rej; });
   inst.openSearchEpoch = 0;
+  inst.openSearchHistoryEpoch = 0;
   inst.searchToggleDesiredOpen = false;
   inst.searchManager = null;
   inst.state = { searchModal: null, isDestroyed: false };
