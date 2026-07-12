@@ -5,7 +5,7 @@ import { generateBets } from '../scripts/_bet-templates.mjs';
 import { COMMODITY_BET_TEMPLATES, COMMODITY_FEED } from '../scripts/_bet-templates-commodities.mjs';
 import { parseMetricKey, resolveHardSpec } from '../scripts/_forecast-resolution-eval.mjs';
 import { RESOLUTION_FEED_KEYS } from '../scripts/_forecast-resolution.mjs';
-import { shapeResolutionFeed } from '../scripts/seed-forecast-resolutions.mjs';
+import { shapeResolutionFeed, ingestHistory, samplePendingEntries, resolveDueEntries } from '../scripts/seed-forecast-resolutions.mjs';
 import { buildBetsSnapshot } from '../scripts/seed-forecast-bets.mjs';
 import { EIA_PETROLEUM_FEED } from '../scripts/_bet-templates-energy.mjs';
 
@@ -144,7 +144,7 @@ describe('commodity bets resolve end-to-end (settlement-gated on quote freshness
 describe('seeder emits both energy and commodity bets', () => {
   it('combines families; commodity bets use the honest thin-history prior', () => {
     const snap = buildBetsSnapshot({
-      [COMMODITY_FEED]: { _seed: {}, data: commoditiesFixture() },
+      [COMMODITY_FEED]: { _seed: { fetchedAt: NOW }, data: commoditiesFixture() },
     }, NOW, {});
     // 4 commodity bets (no energy feed provided here)
     assert.equal(snap.predictions.length, 4);
@@ -153,5 +153,62 @@ describe('seeder emits both energy and commodity bets', () => {
       assert.equal(bet.probability, 0.4); // commodity series empty → prior
     }
     assert.ok(snap.predictions.some((b) => b.resolution.metricKey.includes('symbol==CL=F')));
+  });
+
+  it('does NOT generate a commodity bet from a stale kept-warm envelope (P2 #3)', () => {
+    const stale = { [COMMODITY_FEED]: { _seed: { fetchedAt: NOW - 6 * DAY_MS }, data: commoditiesFixture() } };
+    assert.equal(buildBetsSnapshot(stale, NOW, {}).predictions.length, 0); // 6d > 5d cap → dropped
+    const fresh = { [COMMODITY_FEED]: { _seed: { fetchedAt: NOW - DAY_MS }, data: commoditiesFixture() } };
+    assert.equal(buildBetsSnapshot(fresh, NOW, {}).predictions.length, 4);
+  });
+});
+
+describe('commodity resolution hardening (review fixes)', () => {
+  function wtiEntryInLedger() {
+    const snap = buildBetsSnapshot({ [COMMODITY_FEED]: { _seed: { fetchedAt: NOW }, data: commoditiesFixture() } }, NOW, {});
+    const ledger = ingestHistory({}, [snap], NOW);
+    const key = Object.keys(ledger).find((k) => ledger[k].spec?.metricKey?.includes('symbol==CL=F'));
+    return { ledger, key, deadline: ledger[key].deadline };
+  }
+
+  it('never prefers a stale post-deadline sample over the later fresh quote (P1 two-cycle)', () => {
+    const { ledger, key, deadline } = wtiEntryInLedger();
+    // Cycle 1: post-deadline but the feed still holds a STALE quote (asOf 2 days
+    // pre-deadline) whose price 69.0 would score YES.
+    const cycle1 = deadline + DAY_MS;
+    const staleFeed = { [COMMODITY_FEED]: shapeResolutionFeed(COMMODITY_FEED, {
+      _seed: { fetchedAt: deadline - 2 * DAY_MS },
+      data: { quotes: [{ symbol: 'CL=F', price: 69.0, change: -0.5 }] },
+    }) };
+    samplePendingEntries(ledger, staleFeed, cycle1);
+    resolveDueEntries(ledger, staleFeed, cycle1);
+    assert.equal(ledger[key].status, 'pending'); // gate held the stale cycle
+
+    // Cycle 2: the feed freshens (asOf post-deadline) to 70.5, which scores NO.
+    const cycle2 = deadline + 2 * DAY_MS;
+    const freshFeed = { [COMMODITY_FEED]: shapeResolutionFeed(COMMODITY_FEED, {
+      _seed: { fetchedAt: cycle2 },
+      data: { quotes: [{ symbol: 'CL=F', price: 70.5, change: -0.5 }] },
+    }) };
+    samplePendingEntries(ledger, freshFeed, cycle2);
+    resolveDueEntries(ledger, freshFeed, cycle2);
+    assert.equal(ledger[key].status, 'resolved');
+    // Must reflect the FRESH 70.5 (NO), not the stored stale 69.0 (YES).
+    assert.equal(ledger[key].outcome, 'NO');
+  });
+
+  it('pends (not VOIDs) when a partial refresh drops the symbol, VOIDs after grace (P2 #2)', () => {
+    const { ledger, key, deadline } = wtiEntryInLedger();
+    const entry = { spec: ledger[key].spec, generatedAt: NOW };
+    // Feed present + fresh, but CL=F is absent (partial refresh dropped it).
+    const partial = shapeResolutionFeed(COMMODITY_FEED, {
+      _seed: { fetchedAt: deadline + DAY_MS },
+      data: { quotes: [{ symbol: 'BZ=F', price: 76 }] },
+    });
+    const pend = resolveHardSpec(entry, partial, [], deadline + DAY_MS);
+    assert.equal(pend.status, 'pending');
+    assert.equal(pend.evidence.reason, 'value_source_record_missing');
+    const voided = resolveHardSpec(entry, partial, [], deadline + 11 * DAY_MS);
+    assert.equal(voided.outcome, 'VOID');
   });
 });

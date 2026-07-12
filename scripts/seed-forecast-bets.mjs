@@ -46,6 +46,28 @@ const EIA_METRICS = ['inventory', 'production', 'wti', 'brent'];
 const ALL_BET_TEMPLATES = [...ENERGY_BET_TEMPLATES, ...COMMODITY_BET_TEMPLATES];
 const BET_FEEDS = [EIA_PETROLEUM_FEED, COMMODITY_FEED];
 
+// Per-feed generation freshness contract. A live-price feed (commodities) kept
+// warm through a multi-day outage (extendExistingTtl preserves the old
+// _seed.fetchedAt) must NOT mint a "newly dated" bet from a stale price (#5243
+// P2). 5 days tolerates any weekend/holiday gap but rejects a real outage.
+// Period feeds (EIA weekly) are naturally days old → not listed (no cap).
+const FEED_MAX_GENERATION_AGE_MS = { [COMMODITY_FEED]: 5 * 24 * 60 * 60 * 1000 };
+
+// Drop feeds whose envelope predates their freshness contract, so their
+// templates receive no data and generate no bet. Pure (no I/O / console).
+function filterFreshFeeds(feedsByKey, nowMs) {
+  const out = {};
+  for (const [key, value] of Object.entries(feedsByKey || {})) {
+    const maxAge = FEED_MAX_GENERATION_AGE_MS[key];
+    if (maxAge != null) {
+      const fetchedAt = Number(value?._seed?.fetchedAt);
+      if (Number.isFinite(fetchedAt) && nowMs - fetchedAt > maxAge) continue; // stale → drop
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 function unwrapFeeds(feedsByKey) {
   const unwrapped = {};
   for (const [key, value] of Object.entries(feedsByKey || {})) {
@@ -82,8 +104,9 @@ export function computeNextSeries(feedsByKey, priorSeries = {}, cap = SERIES_CAP
 // accumulated observation series (thin history honestly falls back to a
 // directional prior inside baseRateProbability). Exported for tests (no I/O).
 export function buildBetsSnapshot(feedsByKey, nowMs, priorSeries = {}) {
-  const unwrapped = unwrapFeeds(feedsByKey);
-  const series = computeNextSeries(unwrapped, priorSeries);
+  const fresh = filterFreshFeeds(feedsByKey, nowMs);
+  const unwrapped = unwrapFeeds(fresh);
+  const series = computeNextSeries(fresh, priorSeries);
   const bets = generateBets(ALL_BET_TEMPLATES, unwrapped, nowMs);
   for (const bet of bets) {
     const parsed = parseMetricKey(bet.resolution?.metricKey);

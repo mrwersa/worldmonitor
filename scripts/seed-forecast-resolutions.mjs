@@ -17,7 +17,7 @@
 import { CHROME_UA, loadEnvFile, runSeed } from './_seed-utils.mjs';
 import { unwrapEnvelope } from './_seed-envelope-source.mjs';
 import { resolveR2StorageConfig, putR2JsonObject } from './_r2-storage.mjs';
-import { parseMetricKey, resolveHardSpec, extractMetricValue } from './_forecast-resolution-eval.mjs';
+import { parseMetricKey, resolveHardSpec, extractMetricValue, extractMetricObservation } from './_forecast-resolution-eval.mjs';
 import { CONFLICT_COUNT_FEED_AVAILABLE, UNREST_COUNT_FEED_AVAILABLE, CONFLICT_COUNT_SOURCE_FEED, UNREST_COUNT_SOURCE_FEED } from './_forecast-resolution.mjs';
 import { computeScorecard, DEFAULT_ROLLING_WINDOW_DAYS } from './_forecast-scorecard.mjs';
 import { BETS_HISTORY_KEY } from './_forecast-bets-keys.mjs';
@@ -879,9 +879,15 @@ export function samplePendingEntries(ledger, feedsByKey, nowMs) {
       entry.samples = appendSample(entry.samples, { ts: nowMs, error: `missing_feed:${entry.spec.sourceFeed || parsed.feedKey}` });
       continue;
     }
-    const value = extractMetricValue(parsed, feedData);
+    const { value, asOf } = extractMetricObservation(parsed, feedData);
+    // Stamp the sample with the source observation time (asOf) when the feed
+    // provides one, NOT the cycle time — otherwise a stale kept-warm reading
+    // gets a post-deadline ts and is later preferred over the fresh quote,
+    // defeating the settlement gate (#5243 P1). Feeds with no per-record
+    // timestamp (riskScore/hexCount/yesPrice) keep the cycle time.
+    const sampleTs = Number.isFinite(asOf) ? asOf : nowMs;
     entry.samples = Number.isFinite(value)
-      ? appendSample(entry.samples, { ts: nowMs, value })
+      ? appendSample(entry.samples, { ts: sampleTs, value })
       : appendSample(entry.samples, { ts: nowMs, error: 'metric_not_found' });
   }
 }
