@@ -60,10 +60,14 @@ function markWmSessionDead(): void {
   // One warning per degraded episode — reportServerError (premium-fetch.ts)
   // deliberately skips the synthetic X-Wm-Session-Degraded 503s, so this is
   // the only remote signal that anonymous browsing is degraded (#5245).
-  sentryEnqueue((s) => s.captureMessage(
-    'wm-session dead: anonymous API calls suppressed',
-    { level: 'warning', tags: { kind: 'wm_session_dead' } },
-  ));
+  // Guarded: a telemetry throw must never skip the degraded-event dispatch
+  // below, nor turn the interceptor's recovery return into a rejection.
+  try {
+    sentryEnqueue((s) => s.captureMessage(
+      'wm-session dead: anonymous API calls suppressed',
+      { level: 'warning', tags: { kind: 'wm_session_dead' } },
+    ));
+  } catch { /* best-effort telemetry */ }
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new Event(WM_SESSION_DEGRADED_EVENT));
   }

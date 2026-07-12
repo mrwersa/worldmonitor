@@ -452,6 +452,51 @@ describe('wm-session refresh-on-401 (Layer 2)', () => {
     assert.equal(captures[0].ctx.tags?.kind, 'wm_session_dead');
   });
 
+  it('a throwing Sentry enqueue never skips the degraded-event dispatch nor rejects the recovery return', async () => {
+    // greptile P2 on PR #5247: the capture sits upstream of the
+    // WM_SESSION_DEGRADED_EVENT dispatch AND inside the interceptor's 401
+    // recovery path — an unguarded throw would both hide the UI toast and
+    // turn the wrapped fetch into a rejection instead of returning the 401.
+    memoryStorage.clear();
+    mod.__setWmSessionSentryEnqueueForTests((() => {
+      throw new Error('sdk exploded');
+    }) as Parameters<typeof mod.__setWmSessionSentryEnqueueForTests>[0]);
+
+    // window === globalThis in this harness, and Node's main-thread
+    // globalThis is not an EventTarget — stub dispatchEvent so the module's
+    // `typeof window.dispatchEvent === 'function'` guard takes the dispatch
+    // branch and we can observe it.
+    let degradedEvents = 0;
+    const g = globalThis as unknown as { dispatchEvent?: (ev: Event) => boolean };
+    g.dispatchEvent = (ev: Event) => {
+      if (ev.type === mod.WM_SESSION_DEGRADED_EVENT) degradedEvents += 1;
+      return true;
+    };
+
+    currentFetchHandler = (input) => {
+      const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : input.url);
+      if (url.includes('/api/wm-session')) {
+        return Promise.resolve(new Response(JSON.stringify({ exp: FAR_FUTURE }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      return Promise.resolve(new Response('still-rejected', { status: 401 }));
+    };
+
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const resp = await wrappedFetch('https://api.worldmonitor.app/api/bootstrap');
+      assert.equal(resp.status, 401, 'recovery must return the server 401, not reject');
+    } finally {
+      console.warn = originalWarn;
+      delete g.dispatchEvent;
+    }
+
+    assert.equal(degradedEvents, 1, 'degraded event must still dispatch when telemetry throws');
+  });
+
   it('single-flights concurrent 401 recovery so only one retry verifies the mint', async () => {
     memoryStorage.clear();
     let gatedAttempts = 0;
