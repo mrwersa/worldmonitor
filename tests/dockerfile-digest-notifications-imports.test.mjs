@@ -22,9 +22,13 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Shared scanner/resolver (comment-stripping tokenizer + edge extraction) —
+// one home for the machinery this guard previously copied from the relay
+// test; see tests/_lib/import-graph-walk.mjs (#5231 review follow-up).
+import { collectRelativeImports, resolveImport } from './_lib/import-graph-walk.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -85,31 +89,9 @@ function isCovered(coverage, relPath) {
   return false;
 }
 
-/**
- * Collect relative imports from a JS/TS source file. Same scanner the
- * relay test uses (covers ESM import/export-from + CJS require + CJS
- * createRequire).
- */
-function collectRelativeImports(filePath) {
-  const src = readFileSync(filePath, 'utf-8');
-  const imports = new Set();
-  const esmRe = /(?:^|\s|;)(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?['"](\.[^'"]+)['"]/g;
-  for (const m of src.matchAll(esmRe)) imports.add(m[1]);
-  const cjsRe = /(?:^|[^a-zA-Z0-9_$])require\s*\(\s*['"](\.[^'"]+)['"]/g;
-  for (const m of src.matchAll(cjsRe)) imports.add(m[1]);
-  const createRequireRe = /createRequire\s*\([^)]*\)\s*\(\s*['"](\.[^'"]+)['"]/g;
-  for (const m of src.matchAll(createRequireRe)) imports.add(m[1]);
-  return imports;
-}
-
-function resolveImport(fromFile, relImport) {
-  const abs = resolve(dirname(fromFile), relImport);
-  if (existsSync(abs) && !statSync(abs).isDirectory()) return abs;
-  for (const ext of ['.mjs', '.cjs', '.js', '.ts']) {
-    if (existsSync(abs + ext)) return abs + ext;
-  }
-  return null;
-}
+// Extension candidates for this image: the digest cron's graph spans .ts
+// modules under server/_shared/, unlike the relay's .mjs/.cjs-only graph.
+const DIGEST_RESOLVE_EXTS = ['.mjs', '.cjs', '.js', '.ts'];
 
 describe('Dockerfile.digest-notifications — transitive-import closure', () => {
   const dockerfile = resolve(root, 'Dockerfile.digest-notifications');
@@ -180,7 +162,7 @@ describe('Dockerfile.digest-notifications — transitive-import closure', () => 
       visited.add(file);
       if (!existsSync(file)) continue;
       for (const rel of collectRelativeImports(file)) {
-        const resolved = resolveImport(file, rel);
+        const resolved = resolveImport(file, rel, DIGEST_RESOLVE_EXTS);
         if (!resolved) continue;
         const relToRoot = resolved.startsWith(root + '/')
           ? resolved.slice(root.length + 1)

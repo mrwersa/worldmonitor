@@ -16,18 +16,27 @@
 // declared only in the ROOT package.json, absent from the container. The
 // seeder never calls the rate limiter; it crashed anyway, at resolution time.
 //
-// The guard enforces three container invariants, per container, with the
-// COPY roots and installed-package set DERIVED from each Dockerfile (so the
-// test cannot drift from the image contract):
-//   1. every relative import in the reachable graph resolves on disk;
+// The guard enforces four container invariants, per container, with the
+// COPY roots, installed-package set, tsx-loader presence, and CMD entry all
+// DERIVED from each Dockerfile (so the test cannot drift from the image
+// contract — including the entry point it walks and the resolution model
+// it simulates):
+//   1. every relative import in the reachable graph resolves on disk —
+//      under the container's OWN resolution model (a no-tsx container gets
+//      plain-node rules: no extension guessing, no TypeScript);
 //   2. every resolved file lives inside the container's COPY roots (a module
 //      that resolves in the repo but is never COPY'd — e.g. api/ — is the
 //      same production crash);
 //   3. every bare specifier (static import OR require) is a node builtin or
-//      an installed package.
+//      an installed package;
+//   4. the Dockerfile CMD entry equals the bundle script this guard walks —
+//      an entry swap that left the old file on disk would otherwise keep the
+//      guard green while the deployed cron loads an unwalked graph.
 //
 // Scope notes (kept deliberately aligned with the crash mechanics):
-//  - `import type` / `export type` edges are skipped (tsx erases them).
+//  - `import type` / `export type` edges are skipped, including the inline
+//    all-type form `import { type X } from '...'` (tsx erases both). A mixed
+//    clause (`{ type X, real }`) is still a runtime edge.
 //  - Comments are stripped (structure-preserving tokenizer) before edge
 //    extraction, so commented-out imports and JSDoc `@typedef {import(...)}`
 //    text are not edges, while string/template contents are preserved.
@@ -39,32 +48,35 @@
 //    _seed-utils.mjs eagerly createRequire()s _proxy-utils.cjs at module top
 //    level, so that CJS closure loads at seeder startup.
 //
-// The final describe block is a self-test: it builds a synthetic module tree
-// in a tmpdir with one planted violation of each class and asserts the
-// walker still catches them — so a regex/walker regression fails loudly
-// instead of silently blinding the guard.
+// The shared tokenizer/extraction/walk machinery lives in
+// tests/_lib/import-graph-walk.mjs (also consumed by the relay and
+// digest-notifications Dockerfile guards). The self-test describe blocks
+// below exercise that shared machinery with one planted violation of each
+// class — so a regex/walker regression fails loudly instead of silently
+// blinding all three guards.
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { isBuiltin } from 'node:module';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, extname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { walkContainerGraph } from './_lib/import-graph-walk.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
 // --- Dockerfile contract derivation ----------------------------------------
 
-// Directory-level COPY sources (`COPY <dir>/ ./<dir>/`) define where imports
-// may resolve; the `npm install` RUN line defines the bare-specifier budget.
-// Deriving both here means adding a package to the image or a new COPY root
-// updates the guard automatically — and removing one makes the guard fail
-// loudly instead of silently passing on a contract the image no longer meets.
-function parseDockerfileContract(dockerfileName) {
-  const src = readFileSync(join(root, dockerfileName), 'utf-8');
-
+// The Dockerfile is the single source of truth for the container contract:
+// directory-level COPY sources (`COPY <dir>/ ./<dir>/`) define where imports
+// may resolve; the `npm install` RUN line defines the bare-specifier budget;
+// the tsx loader's presence (install line or NODE_OPTIONS --import) defines
+// the resolution model; and the CMD line defines the entry whose graph the
+// container actually loads. Deriving all four here means an image change
+// updates the guard automatically — and a drift makes the guard fail loudly
+// instead of silently passing on a contract the image no longer meets.
+function parseDockerfileContractSrc(src, label) {
   const copyRoots = [];
   for (const m of src.matchAll(/^COPY\s+([A-Za-z0-9._-]+)\/\s+\.\//gm)) {
     copyRoots.push(m[1]);
@@ -73,208 +85,37 @@ function parseDockerfileContract(dockerfileName) {
   const installedPackages = new Set();
   const installLines = [...src.matchAll(/^RUN\s+npm\s+install\b[^\n]*/gm)];
   for (const [line] of installLines) {
-    for (const m of line.matchAll(/\s((?:@[a-z0-9._-]+\/)?[a-z0-9._-]+)@[\d^~]/g)) {
+    // pkg@1.2.3 / pkg@^1.2 / pkg@~1.2 / @scope/pkg@... / pkg@latest / pkg@next
+    for (const m of line.matchAll(/\s((?:@[a-z0-9._-]+\/)?[a-z0-9._-]+)@(?=[\d^~]|latest\b|next\b)/g)) {
       installedPackages.add(m[1]);
     }
   }
   if (installLines.length > 0) {
     assert.ok(
       installedPackages.size > 0,
-      `${dockerfileName} has an npm install line but no parseable package@version tokens — update the parser with the Dockerfile refactor`,
+      `${label} has an npm install line but no parseable package@version tokens — update the parser with the Dockerfile refactor`,
     );
   }
+
+  // tsx presence decides the resolution model the container runs under —
+  // either an installed tsx package or a NODE_OPTIONS --import of its loader.
+  const hasTsx = installedPackages.has('tsx') || /^ENV\s+NODE_OPTIONS="[^"]*tsx[^"]*"/m.test(src);
   // tsx is the ESM loader, wired via NODE_OPTIONS — code importing tsx
   // directly would be a smell this guard should surface, so it does not
   // count toward the bare-specifier budget.
   installedPackages.delete('tsx');
 
-  return { copyRoots, installedPackages };
+  // CMD ["node", "scripts/<entry>"] — the entry decides which graph the
+  // container loads first; buildContract asserts it matches the walked
+  // bundle script.
+  const cmd = src.match(/^CMD\s+\[\s*"node"\s*,\s*"([^"]+)"\s*\]/m);
+  const entryScript = cmd ? cmd[1] : null;
+
+  return { copyRoots, installedPackages, hasTsx, entryScript };
 }
 
-// --- Source preparation and edge extraction ---------------------------------
-
-// Structure-preserving comment strip. A state machine, not regexes: naive
-// regex stripping misreads `/*` inside comment text or strings (a comment
-// mentioning `@upstash/*` swallowed everything to the next `*/`, silently
-// deleting real imports from extraction) and misreads `//` inside string
-// literals. Comments are removed exactly; string/template contents and line
-// structure are preserved. Known limit: a bare `//` inside a regex literal's
-// character class would be misread — no such shape exists in the walked
-// graphs, and the deep-node canaries below backstop it.
-function stripComments(src) {
-  let out = '';
-  let state = 'code'; // code | line | block | squote | dquote | template
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    const n = src[i + 1];
-    if (state === 'code') {
-      if (c === '/' && n === '/') { state = 'line'; i += 2; continue; }
-      if (c === '/' && n === '*') { state = 'block'; i += 2; continue; }
-      if (c === "'") state = 'squote';
-      else if (c === '"') state = 'dquote';
-      else if (c === '`') state = 'template';
-      out += c; i += 1; continue;
-    }
-    if (state === 'line') {
-      if (c === '\n') { state = 'code'; out += c; }
-      i += 1; continue;
-    }
-    if (state === 'block') {
-      if (c === '*' && n === '/') { state = 'code'; i += 2; continue; }
-      if (c === '\n') out += c;
-      i += 1; continue;
-    }
-    // Inside a string or template literal: pass through, honor escapes.
-    if (c === '\\') { out += c + (n ?? ''); i += 2; continue; }
-    if ((state === 'squote' && c === "'") || (state === 'dquote' && c === '"') || (state === 'template' && c === '`')) {
-      state = 'code';
-    }
-    out += c; i += 1;
-  }
-  return out;
-}
-
-// Extract import edges from one source file (comments already stripped).
-function extractEdges(src) {
-  const staticSpecs = [];
-  const dynamicSpecs = [];
-  const requireSpecs = [];
-
-  // import ... from '...' (multi-line safe; skips `import type`)
-  for (const m of src.matchAll(/^[ \t]*import\s+(?!type\s)[^'";]*?\bfrom\s*['"]([^'"]+)['"]/gms)) {
-    staticSpecs.push(m[1]);
-  }
-  // side-effect: import '...'
-  for (const m of src.matchAll(/^[ \t]*import\s*['"]([^'"]+)['"]/gm)) {
-    staticSpecs.push(m[1]);
-  }
-  // export { ... } from '...' / export * from '...' (skips `export type`)
-  for (const m of src.matchAll(/^[ \t]*export\s+(?!type\b)(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s*from\s*['"]([^'"]+)['"]/gms)) {
-    staticSpecs.push(m[1]);
-  }
-  // dynamic import('...') literals
-  for (const m of src.matchAll(/\bimport\(\s*['"]([^'"]+)['"]/g)) {
-    dynamicSpecs.push(m[1]);
-  }
-  // require('...') literals (plain require in .cjs, or a createRequire-bound
-  // local named require)
-  for (const m of src.matchAll(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g)) {
-    requireSpecs.push(m[1]);
-  }
-  // createRequire(import.meta.url)('...') — immediately-invoked form; the
-  // plain require regex cannot see it (no lowercase `require(` substring)
-  for (const m of src.matchAll(/\bcreateRequire\([^)]*\)\(\s*['"]([^'"]+)['"]\s*\)/g)) {
-    requireSpecs.push(m[1]);
-  }
-  return { staticSpecs, dynamicSpecs, requireSpecs };
-}
-
-function isBare(spec) {
-  return !spec.startsWith('.') && !spec.startsWith('/');
-}
-
-// Resolve a relative specifier the way node+tsx would inside the container.
-function resolveRelative(fromFile, spec) {
-  const base = resolve(dirname(fromFile), spec);
-  const candidates = [
-    base,
-    `${base}.ts`,
-    `${base}.mts`,
-    `${base}.js`,
-    `${base}.mjs`,
-    `${base}.cjs`,
-    join(base, 'index.ts'),
-    join(base, 'index.js'),
-    join(base, 'index.mjs'),
-  ];
-  // TS-style: an explicit .js specifier may map to a .ts source.
-  if (spec.endsWith('.js')) candidates.push(base.replace(/\.js$/, '.ts'));
-  if (spec.endsWith('.mjs')) candidates.push(base.replace(/\.mjs$/, '.mts'));
-  return candidates.find((p) => existsSync(p) && statSync(p).isFile()) ?? null;
-}
-
-// --- The walk ----------------------------------------------------------------
-
-// Walk the container-reachable graph from `rootFiles` under `contract`:
-//   contract.repoRoot        — absolute path imports may not escape reporting-wise
-//   contract.copyRootDirs    — absolute dirs the image COPYs (containment set)
-//   contract.dynamicRootDirs — absolute dirs dynamic import() literals are
-//                              followed into (executed-unconditionally set)
-//   contract.installedPackages — bare-specifier budget beyond node builtins
-// Returns violations/unresolved (each with the import chain from a root) and
-// the visited set for reachability assertions.
-function walkContainerGraph(rootFiles, contract) {
-  const parent = new Map();
-  const visited = new Set();
-  const queue = [...rootFiles];
-  const violations = [];
-  const unresolved = [];
-
-  const chainOf = (file) => {
-    const chain = [];
-    for (let f = file; f; f = parent.get(f)) chain.unshift(relative(contract.repoRoot, f));
-    return chain.join('\n    -> ');
-  };
-
-  const inside = (dirs, p) => dirs.some((d) => p.startsWith(d + sep));
-
-  const followRelative = (file, spec) => {
-    const resolved = resolveRelative(file, spec);
-    if (!resolved) {
-      unresolved.push(`'${spec}' imported from\n    ${chainOf(file)}`);
-      return;
-    }
-    if (!inside(contract.copyRootDirs, resolved)) {
-      violations.push(
-        `'${spec}' resolves in the repo but OUTSIDE the container COPY set (${relative(contract.repoRoot, resolved)}) via\n    ${chainOf(file)}`,
-      );
-      return;
-    }
-    if (!visited.has(resolved) && !parent.has(resolved)) parent.set(resolved, file);
-    queue.push(resolved);
-  };
-
-  const checkBare = (file, spec, how) => {
-    const pkg = spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/');
-    if (!isBuiltin(spec) && !contract.installedPackages.has(pkg)) {
-      violations.push(`'${spec}' ${how} via\n    ${chainOf(file)}`);
-    }
-  };
-
-  while (queue.length > 0) {
-    const file = queue.shift();
-    if (visited.has(file)) continue;
-    visited.add(file);
-    if (extname(file) === '.json') continue; // data, no imports
-
-    const src = stripComments(readFileSync(file, 'utf-8'));
-    const { staticSpecs, dynamicSpecs, requireSpecs } = extractEdges(src);
-
-    for (const spec of staticSpecs) {
-      if (isBare(spec)) checkBare(file, spec, 'statically imported');
-      else followRelative(file, spec);
-    }
-    for (const spec of requireSpecs) {
-      // A top-level require in a walked file loads eagerly at startup (e.g.
-      // _seed-utils.mjs createRequire()s _proxy-utils.cjs at module scope),
-      // so bare requires get the same budget check as static imports. The
-      // walked graph is require-clean today; if a genuinely-lazy bare
-      // require ever appears, exempt that one site explicitly.
-      if (isBare(spec)) checkBare(file, spec, 'require()d');
-      else followRelative(file, spec);
-    }
-    for (const spec of dynamicSpecs) {
-      if (isBare(spec)) continue; // lazy; cannot classify statically
-      const resolved = resolveRelative(file, spec);
-      if (resolved && inside(contract.dynamicRootDirs, resolved)) {
-        if (!visited.has(resolved) && !parent.has(resolved)) parent.set(resolved, file);
-        queue.push(resolved);
-      }
-    }
-  }
-
-  return { violations, unresolved, visited };
+function parseDockerfileContract(dockerfileName) {
+  return parseDockerfileContractSrc(readFileSync(join(root, dockerfileName), 'utf-8'), dockerfileName);
 }
 
 // --- Container contracts under guard ----------------------------------------
@@ -291,6 +132,7 @@ const CONTAINERS = [
     minMembers: 3,
     mustIncludeMember: 'validate-resilience-sensitivity.mjs',
     dynamicRoots: ['server'],
+    expectsTsx: true,
     minVisited: 32,
     deepNodes: [
       'scripts/_bundle-runner.mjs',
@@ -307,6 +149,7 @@ const CONTAINERS = [
     minMembers: 1,
     mustIncludeMember: 'seed-portwatch-port-activity.mjs',
     dynamicRoots: [],
+    expectsTsx: false,
     minVisited: 8,
     deepNodes: ['scripts/_bundle-runner.mjs', 'scripts/_proxy-utils.cjs'],
   },
@@ -315,22 +158,48 @@ const CONTAINERS = [
 const scriptsDir = join(root, 'scripts');
 
 function buildContract(container) {
-  const { copyRoots, installedPackages } = parseDockerfileContract(container.dockerfile);
+  const { copyRoots, installedPackages, hasTsx, entryScript } = parseDockerfileContract(container.dockerfile);
   assert.ok(
     copyRoots.includes('scripts'),
-    `${container.dockerfile}: no 'COPY scripts/ ...' line parsed — Dockerfile format changed; update parseDockerfileContract`,
+    `${container.dockerfile}: no 'COPY scripts/ ...' line parsed — Dockerfile format changed; update parseDockerfileContractSrc`,
+  );
+  // The CMD entry decides what the deployed container actually loads. If it
+  // ever diverges from the bundle script this guard walks, the guard would
+  // stay green (the stale file still exists on disk) while the cron loads a
+  // completely unwalked graph — so the divergence itself must fail loudly.
+  assert.ok(
+    entryScript,
+    `${container.dockerfile}: no parseable CMD ["node", "<script>"] line — Dockerfile format changed; update parseDockerfileContractSrc`,
+  );
+  assert.equal(
+    entryScript,
+    `scripts/${container.bundleScript}`,
+    `${container.dockerfile} CMD entry (${entryScript}) != the guard's walk root (scripts/${container.bundleScript}) — ` +
+      `update bundleScript alongside the CMD change so the guard walks what the container runs`,
+  );
+  // The resolution model must match the runtime: a no-tsx container cannot
+  // load .ts or extensionless specifiers that tsx would resolve.
+  assert.equal(
+    hasTsx,
+    container.expectsTsx,
+    `${container.dockerfile}: tsx-loader detection (${hasTsx}) != expected (${container.expectsTsx}) — ` +
+      `if the image's loader setup changed, update expectsTsx so the guard simulates the right resolution model`,
   );
   return {
     repoRoot: root,
     copyRootDirs: copyRoots.map((d) => join(root, d)),
     dynamicRootDirs: container.dynamicRoots.map((d) => join(root, d)),
     installedPackages,
+    hasTsx,
   };
 }
 
 function walkRootsFor(container) {
   const bundleSrc = readFileSync(join(scriptsDir, container.bundleScript), 'utf-8');
-  const members = [...bundleSrc.matchAll(/script:\s*'([^']+)'/g)].map((m) => m[1]);
+  // Quote-agnostic: a member added with double quotes or a template literal
+  // must not silently escape the walk (minMembers is only a floor, so an
+  // unmatched ADDED member would otherwise pass the count assertion unwalked).
+  const members = [...bundleSrc.matchAll(/script:\s*(["'`])([^"'`]+)\1/g)].map((m) => m[2]);
   assert.ok(
     members.length >= container.minMembers,
     `${container.bundleScript}: expected >=${container.minMembers} member scripts, found ${members.length} — bundle definition or the member regex drifted`,
@@ -366,7 +235,7 @@ for (const container of CONTAINERS) {
         violations,
         [],
         `import(s) reachable from ${container.name} that its container cannot resolve ` +
-          `(${container.dockerfile} defines the COPY roots and the installed-package budget). ESM resolves ` +
+          `(${container.dockerfile} defines the COPY roots, the installed-package budget, and the loader). ESM resolves ` +
           `these eagerly, so the cron crashes with ERR_MODULE_NOT_FOUND even if the importing code never ` +
           `runs. Break the import chain (extract a dependency-free module) or change the container image:\n\n  ${violations.join('\n\n  ')}`,
       );
@@ -388,6 +257,56 @@ for (const container of CONTAINERS) {
   });
 }
 
+// --- Dockerfile contract parser self-test (synthetic Dockerfile text) --------
+
+describe('parseDockerfileContractSrc self-test (synthetic Dockerfiles)', () => {
+  const SYNTH_TSX_INSTALL = [
+    'FROM node:24-alpine@sha256:abc',
+    'WORKDIR /app',
+    'RUN npm install --prefix /app --no-save @org/pkg@1.2.3 lodash@^4.17.0 semver@~7.5.0 leftpad@latest tsx@4.21.0',
+    'COPY scripts/ ./scripts/',
+    'COPY shared/ ./shared/',
+    'COPY tsconfig.json ./',
+    'ENV NODE_OPTIONS="--max-old-space-size=1024"',
+    'CMD ["node", "scripts/my-entry.mjs"]',
+  ].join('\n');
+
+  it('extracts a populated installed-package budget (scoped, caret, tilde, latest; tsx excluded)', () => {
+    const { installedPackages } = parseDockerfileContractSrc(SYNTH_TSX_INSTALL, 'synthetic');
+    assert.deepEqual(
+      [...installedPackages].sort(),
+      ['@org/pkg', 'leftpad', 'lodash', 'semver'],
+      'install-line extraction must handle scoped packages, range prefixes, and dist-tags on one RUN line',
+    );
+  });
+
+  it('derives COPY roots, CMD entry, and tsx presence from an install line', () => {
+    const { copyRoots, entryScript, hasTsx } = parseDockerfileContractSrc(SYNTH_TSX_INSTALL, 'synthetic');
+    assert.deepEqual(copyRoots, ['scripts', 'shared'], 'dir-level COPY roots only (file COPYs excluded)');
+    assert.equal(entryScript, 'scripts/my-entry.mjs');
+    assert.equal(hasTsx, true, 'tsx@ on the install line must mark the container tsx-shaped');
+  });
+
+  it('detects tsx via NODE_OPTIONS --import when nothing is npm-installed', () => {
+    const viaNodeOptions = parseDockerfileContractSrc(
+      'ENV NODE_OPTIONS="--max-old-space-size=8192 --import=file:///app/node_modules/tsx/dist/loader.mjs"\nCOPY scripts/ ./scripts/\nCMD ["node", "scripts/e.mjs"]',
+      'synthetic',
+    );
+    assert.equal(viaNodeOptions.hasTsx, true);
+    const plain = parseDockerfileContractSrc(
+      'ENV NODE_OPTIONS="--max-old-space-size=1024 --dns-result-order=ipv4first"\nCOPY scripts/ ./scripts/\nCMD ["node", "scripts/e.mjs"]',
+      'synthetic',
+    );
+    assert.equal(plain.hasTsx, false, 'no install line and no tsx in NODE_OPTIONS = plain node');
+    assert.equal(plain.entryScript, 'scripts/e.mjs');
+  });
+
+  it('reports a missing/unparseable CMD as null so buildContract fails loudly', () => {
+    const { entryScript } = parseDockerfileContractSrc('COPY scripts/ ./scripts/\n', 'synthetic');
+    assert.equal(entryScript, null);
+  });
+});
+
 // --- Guard self-test: the walker must still catch each violation class ------
 
 describe('import-graph guard self-test (synthetic fixtures)', () => {
@@ -407,6 +326,7 @@ describe('import-graph guard self-test (synthetic fixtures)', () => {
       [
         "import './helper.mjs';",
         "import 'node:fs';",
+        "import 'ok-npm-pkg';",
         "// import './commented-out.mjs'",
         "import { createRequire } from 'node:module';",
         "const load = createRequire(import.meta.url)('./util.cjs');",
@@ -422,12 +342,14 @@ describe('import-graph guard self-test (synthetic fixtures)', () => {
         '  bThing,',
         "} from './deep/multi.mjs';",
         "import type { Phantom } from 'phantom-types-pkg';",
+        "import { type PhantomInline } from 'phantom-inline-pkg';",
+        "import { type MixedT, mixedReal } from 'mixed-type-pkg';",
         "import '@evil/bare-pkg';",
         '',
       ].join('\n'),
     );
     write('scripts/deep/multi.mjs', "import { esc } from '../../api/outside.js';\nexport const aThing = 1;\nexport const bThing = 2;\n");
-    write('scripts/util.cjs', "const p = require('node:path');\nconst bad = require('bad-npm-cjs');\nmodule.exports = { p, bad };\n");
+    write('scripts/util.cjs', "const p = require('node:path');\nconst bad = require('bad-npm-cjs');\nconst ok = require('@scope/ok-pkg/sub');\nmodule.exports = { p, bad, ok };\n");
     write('srv/scorer.ts', "import gone from './gone';\nexport default gone;\n");
     write('api/outside.js', 'export const esc = true;\n');
 
@@ -435,7 +357,8 @@ describe('import-graph guard self-test (synthetic fixtures)', () => {
       repoRoot: fixRoot,
       copyRootDirs: [join(fixRoot, 'scripts'), join(fixRoot, 'srv')],
       dynamicRootDirs: [join(fixRoot, 'srv')],
-      installedPackages: new Set(),
+      installedPackages: new Set(['ok-npm-pkg', '@scope/ok-pkg']),
+      hasTsx: true,
     });
   });
 
@@ -457,6 +380,20 @@ describe('import-graph guard self-test (synthetic fixtures)', () => {
     );
   });
 
+  it('allows installed packages through the budget (import AND scoped subpath require)', () => {
+    // The allow-path: a package the Dockerfile installs must NOT be flagged.
+    // Guards the extraction-to-budget wiring that the always-empty production
+    // set never exercises (both real containers install only tsx today).
+    assert.ok(
+      !result.violations.some((v) => v.includes('ok-npm-pkg')),
+      `installed package 'ok-npm-pkg' wrongly flagged:\n${result.violations.join('\n')}`,
+    );
+    assert.ok(
+      !result.violations.some((v) => v.includes('@scope/ok-pkg')),
+      `installed scoped package '@scope/ok-pkg' (required via subpath) wrongly flagged:\n${result.violations.join('\n')}`,
+    );
+  });
+
   it('flags a relative import that resolves outside the COPY roots', () => {
     assert.ok(
       result.violations.some((v) => v.includes('OUTSIDE the container COPY set') && v.includes('api')),
@@ -471,15 +408,83 @@ describe('import-graph guard self-test (synthetic fixtures)', () => {
     );
   });
 
-  it('follows multi-line imports and skips comments and type-only imports', () => {
+  it('follows multi-line imports and skips comments and type-only imports (leading and inline)', () => {
     assert.ok(result.visited.has(join(fixRoot, 'scripts/deep/multi.mjs')), 'multi-line import edge not followed');
     assert.ok(
       !result.violations.some((v) => v.includes('phantom-types-pkg')),
       'import type must not count as an edge',
     );
     assert.ok(
+      !result.violations.some((v) => v.includes('phantom-inline-pkg')),
+      'inline all-type clause (import { type X }) must not count as an edge — tsx erases it',
+    );
+    assert.ok(
+      result.violations.some((v) => v.includes("'mixed-type-pkg' statically imported")),
+      `a mixed clause (import { type T, real }) IS a runtime edge and must be flagged; got:\n${result.violations.join('\n')}`,
+    );
+    assert.ok(
       ![...result.visited].some((f) => f.includes('commented-out')),
       'commented-out import must not be walked',
     );
+  });
+});
+
+// --- Plain-node (no-tsx) resolution self-test --------------------------------
+
+describe('plain-node container resolution self-test (hasTsx: false)', () => {
+  let fixRoot;
+  let plain;
+  let withTsx;
+
+  before(() => {
+    fixRoot = mkdtempSync(join(tmpdir(), 'wm-import-graph-plainnode-'));
+    const write = (rel, content) => {
+      const p = join(fixRoot, rel);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, content);
+    };
+
+    write(
+      'scripts/entry.mjs',
+      ["import './plain-ok.mjs';", "import './no-ext';", "import './typed.ts';", ''].join('\n'),
+    );
+    write('scripts/plain-ok.mjs', 'export const ok = 1;\n');
+    write('scripts/no-ext.mjs', 'export const x = 1;\n'); // exists only WITH extension
+    write('scripts/typed.ts', 'export const t = 1;\n');
+
+    const contract = (hasTsx) => ({
+      repoRoot: fixRoot,
+      copyRootDirs: [join(fixRoot, 'scripts')],
+      dynamicRootDirs: [],
+      installedPackages: new Set(),
+      hasTsx,
+    });
+    plain = walkContainerGraph([join(fixRoot, 'scripts/entry.mjs')], contract(false));
+    withTsx = walkContainerGraph([join(fixRoot, 'scripts/entry.mjs')], contract(true));
+  });
+
+  after(() => {
+    rmSync(fixRoot, { recursive: true, force: true });
+  });
+
+  it('flags extensionless and .ts edges a plain-node container cannot load', () => {
+    // The green-while-red hole this closes: these edges work under tsx in
+    // every other repo context (and in the resilience-validation container),
+    // so only a per-container resolution model catches them before the
+    // portwatch cron crashes at import time.
+    assert.ok(
+      plain.violations.some((v) => v.includes("'./no-ext'") && v.includes('plain node')),
+      `missing plain-node violation for extensionless specifier; got:\n${plain.violations.join('\n')}`,
+    );
+    assert.ok(
+      plain.violations.some((v) => v.includes("'./typed.ts'") && v.includes('plain node')),
+      `missing plain-node violation for .ts specifier; got:\n${plain.violations.join('\n')}`,
+    );
+  });
+
+  it('still walks literal loadable specifiers, and the same edges pass under tsx', () => {
+    assert.ok(plain.visited.has(join(fixRoot, 'scripts/plain-ok.mjs')), 'literal .mjs edge must still be walked');
+    assert.deepEqual(withTsx.violations, [], 'the identical graph must be violation-free under a tsx-shaped contract');
+    assert.deepEqual(plain.unresolved, [], 'plain-node misfits are violations (with chains), not unresolved entries');
   });
 });

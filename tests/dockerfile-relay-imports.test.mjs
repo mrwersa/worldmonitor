@@ -12,8 +12,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { dirname, resolve, basename } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Shared scanner/resolver (comment-stripping tokenizer + edge extraction) —
+// one home for the machinery this guard previously hand-rolled; see
+// tests/_lib/import-graph-walk.mjs (#5231 review follow-up).
+import { collectRelativeImports, resolveImport } from './_lib/import-graph-walk.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -25,32 +29,6 @@ function readCopyList(dockerfilePath) {
   const re = /^COPY\s+(scripts\/[^\s]+\.(mjs|cjs))\s+/gm;
   for (const m of src.matchAll(re)) copied.add(m[1]);
   return copied;
-}
-
-function collectRelativeImports(filePath) {
-  const src = readFileSync(filePath, 'utf-8');
-  const imports = new Set();
-  // ESM: import ... from './x.mjs'   |  export ... from './x.mjs'
-  const esmRe = /(?:^|\s|;)(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?['"](\.[^'"]+)['"]/g;
-  for (const m of src.matchAll(esmRe)) imports.add(m[1]);
-  // CJS direct: require('./x.cjs')
-  const cjsRe = /(?:^|[^a-zA-Z0-9_$])require\s*\(\s*['"](\.[^'"]+)['"]/g;
-  for (const m of src.matchAll(cjsRe)) imports.add(m[1]);
-  // CJS chained: createRequire(import.meta.url)('./x.cjs')
-  //  — the final `('./x')` argument is applied to createRequire's return,
-  //    not to a `require(` token, so the cjsRe above misses it.
-  const createRequireRe = /createRequire\s*\([^)]*\)\s*\(\s*['"](\.[^'"]+)['"]/g;
-  for (const m of src.matchAll(createRequireRe)) imports.add(m[1]);
-  return imports;
-}
-
-function resolveImport(fromFile, relImport) {
-  const abs = resolve(dirname(fromFile), relImport);
-  if (existsSync(abs)) return abs;
-  for (const ext of ['.mjs', '.cjs', '.js']) {
-    if (existsSync(abs + ext)) return abs + ext;
-  }
-  return null;
 }
 
 describe('Dockerfile.relay — transitive-import closure', () => {
