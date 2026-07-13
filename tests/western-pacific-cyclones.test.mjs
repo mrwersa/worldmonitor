@@ -56,6 +56,26 @@ describe('western Pacific cyclone identity', () => {
     );
   });
 
+  it('uses the first reported wind and its matching averaging period when the primary agency omits wind', () => {
+    const [cyclone] = canonicalizeWesternPacificCyclones([
+      storm({ windKt: null, windAveragingPeriodMinutes: 10 }),
+      storm({
+        agency: 'JTWC', agencyId: '05W', aliases: ['Nari'], lat: 19.9, lon: 128.5,
+        windKt: 65, windAveragingPeriodMinutes: 1, sourceName: 'JTWC',
+        sourceUrl: 'https://www.metoc.navy.mil/',
+      }),
+    ]);
+
+    assert.equal(cyclone.sourceName, 'JMA', 'the higher-priority agency remains the canonical source');
+    assert.equal(cyclone.windKt, 65);
+    assert.equal(cyclone.windAveragingPeriodMinutes, 1);
+  });
+
+  it('rejects missing or non-numeric coordinates instead of coercing them to zero', () => {
+    assert.deepEqual(canonicalizeWesternPacificCyclones([storm({ lat: null })]), []);
+    assert.deepEqual(canonicalizeWesternPacificCyclones([storm({ lon: false })]), []);
+  });
+
   it('does not merge concurrent nearby storms with distinct aliases', () => {
     const cyclones = canonicalizeWesternPacificCyclones([
       storm({ agencyId: '2605', aliases: ['Nari'], stormName: 'Nari' }),

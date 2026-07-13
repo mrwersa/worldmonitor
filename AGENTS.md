@@ -212,7 +212,8 @@ Heavy checks (`test:data`, typechecks, edge-bundle) must run **sequentially** in
 ## Shipping Velocity (Agent Workflow)
 
 - **Before starting work on an issue:** check for parallel/duplicate work first — `gh pr list --search "<issue#>"` AND `git worktree list` (background codex/claude sessions ship PRs under the same account).
-- **After pushing a PR:** don't sleep-poll CI. Enable auto-merge (`gh pr merge <n> --auto --squash` — repo has auto-merge enabled) and/or start `gh pr checks <n> --watch` as a background task; act only when it exits.
+- **Merge authority is explicit and non-delegable:** never merge a PR, enable auto-merge, queue a merge, or run any equivalent GitHub merge action unless the user has explicitly requested that specific action in the current conversation. A request to implement, ship, push, create a PR, or monitor CI does **not** authorize merging. Wait for clear approval and report the ready state instead.
+- **After pushing a PR:** do not sleep-poll CI. Start `gh pr checks <n> --watch` as a background task, or report the current check state; never turn on auto-merge without the explicit approval above.
 - **docs/plans/ is gitignored** — plan documents are local working state and do not travel between worktrees or ship in PRs.
 - **PR-review verification:** never assert a finding is fixed/stale from memory — re-fetch the PR head SHA and diff the cited lines first.
 

@@ -30,6 +30,8 @@ const PROXIMITY_MATCH_MAX_DISTANCE_KM = 90;
 const PROXIMITY_MATCH_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 
 function asFiniteNumber(value) {
+  if ((typeof value !== 'number' && typeof value !== 'string')
+    || (typeof value === 'string' && value.trim() === '')) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -149,7 +151,9 @@ function canonicalIdFor(observations) {
 
 function toCanonicalCyclone(observations, confidence) {
   const active = observations.filter((observation) => observation.status !== 'cancelled');
-  const primary = [...(active.length > 0 ? active : observations)].sort(observationOrder)[0];
+  const ranked = [...(active.length > 0 ? active : observations)].sort(observationOrder);
+  const primary = ranked[0];
+  const windObservation = ranked.find((observation) => observation.windKt != null) || primary;
   const allAliases = [...new Set(observations.flatMap((observation) => observation.aliases))].sort();
   return {
     id: `cyclone:${canonicalIdFor(observations)}`,
@@ -162,8 +166,8 @@ function toCanonicalCyclone(observations, confidence) {
     lat: primary.lat,
     lon: primary.lon,
     observedAt: primary.observedAt,
-    windKt: primary.windKt,
-    windAveragingPeriodMinutes: primary.windAveragingPeriodMinutes,
+    windKt: windObservation.windKt,
+    windAveragingPeriodMinutes: windObservation.windAveragingPeriodMinutes,
     pressureMb: primary.pressureMb,
     classification: primary.classification,
     sourceName: primary.sourceName,

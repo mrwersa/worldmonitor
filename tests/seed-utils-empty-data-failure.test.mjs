@@ -16,6 +16,7 @@ const ORIGINAL_ENV = {
   UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
   UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
 };
+const ORIGINAL_SIGTERM_LISTENERS = new Set(process.rawListeners('SIGTERM'));
 
 let recordedCalls;
 let expireResult;
@@ -52,6 +53,9 @@ afterEach(() => {
   else process.env.UPSTASH_REDIS_REST_URL = ORIGINAL_ENV.UPSTASH_REDIS_REST_URL;
   if (ORIGINAL_ENV.UPSTASH_REDIS_REST_TOKEN == null) delete process.env.UPSTASH_REDIS_REST_TOKEN;
   else process.env.UPSTASH_REDIS_REST_TOKEN = ORIGINAL_ENV.UPSTASH_REDIS_REST_TOKEN;
+  for (const listener of process.rawListeners('SIGTERM')) {
+    if (!ORIGINAL_SIGTERM_LISTENERS.has(listener)) process.removeListener('SIGTERM', listener);
+  }
 });
 
 function countMetaSets(resourceSuffix) {
@@ -60,6 +64,14 @@ function countMetaSets(resourceSuffix) {
     && c.body[0] === 'SET'
     && typeof c.body[1] === 'string'
     && c.body[1] === `seed-meta:test:${resourceSuffix}`,
+  ).length;
+}
+
+function countSetsFor(key) {
+  return recordedCalls.filter(c =>
+    Array.isArray(c.body)
+    && c.body[0] === 'SET'
+    && c.body[1] === key,
   ).length;
 }
 
@@ -179,6 +191,64 @@ test('validation failure WITHOUT emptyDataIsFailure DOES refresh seed-meta (quie
     countMetaSets('empty-legacy') >= 1,
     'legacy behavior for quiet-period feeds (news, events) must still write ' +
     'seed-meta count=0 so health does not false-positive STALE_SEED',
+  );
+});
+
+test('contract extra keys publish their explicit seed-meta after a successful write', async () => {
+  const exitCode = await runWithExitTrap(() => runSeed('test', 'extra-meta-success', 'test:extra-meta-success:v1', async () => ({
+    events: [{ id: 'canonical' }],
+    warnings: [{ id: 'warning' }],
+  }), {
+    validateFn: (data) => Array.isArray(data?.events),
+    ttlSeconds: 3600,
+    sourceVersion: 'test-v1',
+    schemaVersion: 1,
+    maxStaleMin: 120,
+    declareRecords: (data) => data.events.length,
+    extraKeys: [{
+      key: 'test:extra-meta-success:warnings',
+      transform: (data) => data.warnings,
+      declareRecords: (warnings) => warnings.length,
+      metaKey: 'seed-meta:test:extra-meta-success:warnings',
+      metaCritical: true,
+      skipWhenEmpty: true,
+    }],
+  }));
+
+  assert.equal(exitCode, 0);
+  assert.equal(
+    countSetsFor('seed-meta:test:extra-meta-success:warnings'),
+    1,
+    'a published extra key must refresh its explicit seed-meta key',
+  );
+});
+
+test('skipWhenEmpty preserves the last-good extra key without refreshing its seed-meta', async () => {
+  const exitCode = await runWithExitTrap(() => runSeed('test', 'extra-meta-empty', 'test:extra-meta-empty:v1', async () => ({
+    events: [{ id: 'canonical' }],
+    warnings: [],
+  }), {
+    validateFn: (data) => Array.isArray(data?.events),
+    ttlSeconds: 3600,
+    sourceVersion: 'test-v1',
+    schemaVersion: 1,
+    maxStaleMin: 120,
+    declareRecords: (data) => data.events.length,
+    extraKeys: [{
+      key: 'test:extra-meta-empty:warnings',
+      transform: (data) => data.warnings,
+      declareRecords: (warnings) => warnings.length,
+      metaKey: 'seed-meta:test:extra-meta-empty:warnings',
+      metaCritical: true,
+      skipWhenEmpty: true,
+    }],
+  }));
+
+  assert.equal(exitCode, 0);
+  assert.equal(
+    countSetsFor('seed-meta:test:extra-meta-empty:warnings'),
+    0,
+    'an empty transformed extra key must not refresh freshness metadata',
   );
 });
 
