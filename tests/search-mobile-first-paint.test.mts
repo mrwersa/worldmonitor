@@ -67,8 +67,8 @@ const harnessSource = `
     showRecentOrEmpty() { this.recentOrEmptyCalls++; }
     renderChips() { this.chipRenderCalls++; }
 
-    ${extractMethod('public open(replaceOverlayId?: string): void {')}
-    ${extractMethod('public close(fromHistory = false): void {')}
+    ${extractMethod('public open(replaceOverlayId?: OverlayId): void {')}
+    ${extractMethod("public close(origin: OverlayCloseOrigin = 'control'): void {")}
     ${extractMethod('public refreshSearch(): void {')}
     ${extractMethod('private scheduleMobileReveal(overlay: HTMLElement): void {')}
     ${extractMethod('private scheduleMobileInitialPopulation(): void {')}

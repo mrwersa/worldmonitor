@@ -3,9 +3,10 @@ import { describe, it } from 'node:test';
 
 import { OverlayHistoryManager, type OverlayHistoryEnvironment } from '../src/utils/overlay-history';
 
-function createEnvironment() {
+function createEnvironment({ asyncBack = false } = {}) {
   const listeners = new Set<(event: PopStateEvent) => void>();
   const entries: unknown[] = [null];
+  const pendingBacks: Array<() => void> = [];
   let index = 0;
 
   const environment: OverlayHistoryEnvironment = {
@@ -21,9 +22,13 @@ function createEnvironment() {
     },
     back() {
       if (index === 0) return;
-      index -= 1;
-      const event = { state: entries[index] } as PopStateEvent;
-      listeners.forEach((listener) => listener(event));
+      const navigate = () => {
+        index -= 1;
+        const event = { state: entries[index] } as PopStateEvent;
+        listeners.forEach((listener) => listener(event));
+      };
+      if (asyncBack) pendingBacks.push(navigate);
+      else navigate();
     },
     addPopStateListener(listener) {
       listeners.add(listener);
@@ -40,7 +45,13 @@ function createEnvironment() {
     listeners.forEach((listener) => listener(event));
   };
 
-  return { environment, getIndex: () => index, forward };
+  const flushBack = () => {
+    const navigate = pendingBacks.shift();
+    assert.ok(navigate, 'an asynchronous Back navigation must be pending');
+    navigate();
+  };
+
+  return { environment, getIndex: () => index, forward, flushBack };
 }
 
 describe('OverlayHistoryManager', () => {
@@ -131,12 +142,98 @@ describe('OverlayHistoryManager', () => {
 
     manager.open('settings', () => {
       closed.push('settings');
-      manager.open('confirm', () => closed.push('confirm'));
+      manager.open('search', () => closed.push('search'));
     });
     environment.back();
 
     assert.deepEqual(closed, ['settings']);
-    assert.equal(manager.top(), 'confirm');
+    assert.equal(manager.top(), 'search');
+    manager.destroy();
+  });
+
+  it('queues an open until an asynchronous Back traversal settles', () => {
+    const { environment, getIndex, flushBack } = createEnvironment({ asyncBack: true });
+    const manager = new OverlayHistoryManager(environment);
+
+    manager.open('search', () => {});
+    manager.close('search');
+    manager.open('settings', () => {});
+
+    assert.equal(getIndex(), 1, 'history.state remains on the closing marker until popstate');
+    assert.equal(manager.top(), null, 'the next overlay must wait for the pending traversal');
+
+    flushBack();
+    assert.equal(getIndex(), 1, 'the queued overlay gets one fresh history entry');
+    assert.equal(manager.top(), 'settings');
+    assert.equal(
+      ((environment.state as Record<string, unknown>).__wmOverlay as { id: string }).id,
+      'settings',
+    );
+    manager.destroy();
+  });
+
+  it('keeps a pending gate current while its marker waits behind popstate', () => {
+    const { environment, flushBack } = createEnvironment({ asyncBack: true });
+    const manager = new OverlayHistoryManager(environment);
+
+    manager.open('menu', () => {});
+    manager.close('menu');
+    const gate = manager.beginPending('search-pending', undefined, () => {});
+    assert.equal(gate.isCurrent(), true);
+    manager.replace('search-pending', 'search', () => {});
+
+    flushBack();
+    assert.equal(manager.top(), 'search');
+    manager.destroy();
+  });
+
+  it('falls back to a new entry when replace does not match the top overlay', () => {
+    const { environment, getIndex } = createEnvironment();
+    const manager = new OverlayHistoryManager(environment);
+    const closed: string[] = [];
+
+    manager.open('menu', () => closed.push('menu'));
+    manager.replace('search', 'settings', () => closed.push('settings'));
+
+    assert.equal(getIndex(), 2);
+    assert.equal(manager.top(), 'settings');
+    environment.back();
+    assert.deepEqual(closed, ['settings']);
+    assert.equal(manager.top(), 'menu');
+    manager.destroy();
+  });
+
+  it('replaces a visible overlay in place and reports replacement origin', () => {
+    const { environment, getIndex } = createEnvironment();
+    const manager = new OverlayHistoryManager(environment);
+    const origins: string[] = [];
+
+    manager.open('menu', (origin) => origins.push(`menu:${origin}`));
+    manager.replaceInPlace('menu', 'search-pending', (origin) => origins.push(`search:${origin}`));
+
+    assert.equal(getIndex(), 1);
+    assert.equal(manager.top(), 'search-pending');
+    assert.deepEqual(origins, ['menu:replacement']);
+    environment.back();
+    assert.deepEqual(origins, ['menu:replacement', 'search:history']);
+    manager.destroy();
+  });
+
+  it('invalidates superseded pending gates and promotes only the current gate', () => {
+    const { environment } = createEnvironment();
+    const manager = new OverlayHistoryManager(environment);
+    let firstCancels = 0;
+    let secondCancels = 0;
+    const first = manager.beginPending('search-pending', undefined, () => { firstCancels += 1; });
+    const second = manager.beginPending('search-pending', undefined, () => { secondCancels += 1; });
+
+    assert.equal(first.isCurrent(), false);
+    assert.equal(first.promote('search', () => {}), false);
+    assert.equal(second.isCurrent(), true);
+    assert.equal(second.promote('search', () => {}), true);
+    assert.equal(manager.top(), 'search');
+    assert.equal(firstCancels, 0);
+    assert.equal(secondCancels, 0);
     manager.destroy();
   });
 });

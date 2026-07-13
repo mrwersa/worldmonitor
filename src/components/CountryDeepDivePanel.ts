@@ -59,7 +59,7 @@ const DEPENDENCY_FLAG_LABELS: Record<string, { text: string; cls: string }> = {
 import { toApiUrl } from '@/services/runtime';
 import type { ComputeEnergyShockScenarioResponse, ProductImpact } from '@/generated/client/worldmonitor/intelligence/v1/service_client';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
-import { overlayHistory } from '@/utils/overlay-history';
+import { overlayHistory, type OverlayCloseOrigin } from '@/utils/overlay-history';
 
 
 type ThreatLevel = 'critical' | 'high' | 'medium' | 'low' | 'info';
@@ -288,8 +288,8 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
     this.open();
   }
 
-  public hide(fromHistory = false): void {
-    if (!fromHistory && this.historyRegistered) overlayHistory.close('deep-dive');
+  public hide(origin: OverlayCloseOrigin = 'control'): void {
+    if (origin === 'control' && this.historyRegistered) overlayHistory.close('deep-dive');
     this.historyRegistered = false;
     this.destroyResilienceWidget();
     this.tearDownFollowButton();
@@ -2893,7 +2893,7 @@ export class CountryDeepDivePanel implements CountryBriefPanel {
     document.addEventListener('keydown', this.handleGlobalKeydown);
     if (isMobileDevice()) {
       this.historyRegistered = true;
-      overlayHistory.open('deep-dive', () => this.hide(true));
+      overlayHistory.open('deep-dive', (origin) => this.hide(origin));
     }
     requestAnimationFrame(() => {
       if (this.panel.classList.contains('active')) this.closeButton.focus();

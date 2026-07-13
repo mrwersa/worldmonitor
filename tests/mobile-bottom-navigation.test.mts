@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
+import ts from 'typescript';
 
 const layout = readFileSync(new URL('../src/app/panel-layout.ts', import.meta.url), 'utf8');
 const handlers = readFileSync(new URL('../src/app/event-handlers.ts', import.meta.url), 'utf8');
@@ -11,6 +12,41 @@ const search = readFileSync(new URL('../src/components/SearchModal.ts', import.m
 const popup = readFileSync(new URL('../src/components/MapPopup.ts', import.meta.url), 'utf8');
 const settings = readFileSync(new URL('../src/components/UnifiedSettings.ts', import.meta.url), 'utf8');
 const deepDive = readFileSync(new URL('../src/components/CountryDeepDivePanel.ts', import.meta.url), 'utf8');
+
+function loadReconcileHarness(overlayHistory: unknown): new () => {
+  setActive(tab: string): void;
+  reconcileOverlayForTab(tab: string): string | undefined | null;
+  activeCalls: string[];
+} {
+  const signature = 'private reconcileOverlayForTab(';
+  const start = mobileNav.indexOf(signature);
+  assert.ok(start >= 0, 'mobile navigation must expose one reconciliation method');
+  const braceStart = mobileNav.indexOf('{', start);
+  let depth = 0;
+  let end = -1;
+  for (let index = braceStart; index < mobileNav.length; index += 1) {
+    if (mobileNav[index] === '{') depth += 1;
+    if (mobileNav[index] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end = index + 1;
+        break;
+      }
+    }
+  }
+  assert.ok(end > braceStart, 'reconciliation method must have balanced braces');
+  const method = mobileNav.slice(start, end).replace(/^private\s+/, '');
+  const source = `class Harness {
+    activeCalls: string[] = [];
+    setActive(tab: string): void { this.activeCalls.push(tab); }
+    ${method}
+  }`;
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None },
+  }).outputText;
+  // eslint-disable-next-line no-new-func
+  return new Function('overlayHistory', `${compiled}\nreturn Harness;`)(overlayHistory);
+}
 
 describe('mobile P0 navigation contract (#5201)', () => {
   it('renders the five primary destinations in a real bottom navigation landmark', () => {
@@ -50,11 +86,42 @@ describe('mobile P0 navigation contract (#5201)', () => {
 
   it('routes every P0 overlay family through the shared browser-history manager', () => {
     assert.match(mobileNav, /overlayHistory\.open\('menu'/);
-    assert.match(mobileNav, /overlayHistory\.replace\('menu', 'region'/);
+    assert.match(mobileNav, /overlayHistory\.replaceInPlace\(replaceOverlayId, 'region'/);
     assert.match(search, /overlayHistory\.open\('search'/);
     assert.match(popup, /overlayHistory\.open\('map-popup'/);
     assert.match(settings, /overlayHistory\.open\('settings'/);
     assert.match(deepDive, /overlayHistory\.open\('deep-dive'/);
     assert.match(handlers, /history\.replaceState\(history\.state, '', shareUrl\)/);
+  });
+
+  it('executes one overlay reconciliation contract for every primary-tab transition', () => {
+    const calls: Array<{ method: string; id: string }> = [];
+    let top: string | null = 'search';
+    const overlayHistory = {
+      top: () => top,
+      dismiss: (id: string) => {
+        calls.push({ method: 'dismiss', id });
+        top = null;
+      },
+    };
+    const Harness = loadReconcileHarness(overlayHistory);
+    const harness = new Harness();
+
+    assert.equal(harness.reconcileOverlayForTab('search'), null, 're-tapping Search toggles it closed');
+    assert.deepEqual(calls, [{ method: 'dismiss', id: 'search' }]);
+    assert.deepEqual(harness.activeCalls, ['today']);
+
+    top = 'menu';
+    calls.length = 0;
+    assert.equal(harness.reconcileOverlayForTab('today'), undefined);
+    assert.deepEqual(calls, [{ method: 'dismiss', id: 'menu' }]);
+
+    top = 'search';
+    calls.length = 0;
+    assert.equal(harness.reconcileOverlayForTab('more'), 'search');
+    assert.deepEqual(calls, [], 'Search stays registered until More replaces it in place');
+
+    top = 'settings-pending';
+    assert.equal(harness.reconcileOverlayForTab('search'), 'settings-pending');
   });
 });

@@ -1,12 +1,25 @@
 const OVERLAY_STATE_KEY = '__wmOverlay';
 
+export type OverlayId =
+  | 'menu'
+  | 'region'
+  | 'search'
+  | 'search-pending'
+  | 'settings'
+  | 'settings-pending'
+  | 'map-popup'
+  | 'deep-dive';
+
+export type OverlayCloseOrigin = 'control' | 'history' | 'replacement';
+type OverlayCloseCallback = (origin: OverlayCloseOrigin) => void;
+
 type OverlayMarker = {
-  id: string;
+  id: OverlayId;
   token: string;
 };
 
 type OverlayEntry = OverlayMarker & {
-  closeFromHistory: () => void;
+  close: OverlayCloseCallback;
 };
 
 export interface OverlayHistoryEnvironment {
@@ -18,12 +31,29 @@ export interface OverlayHistoryEnvironment {
   removePopStateListener(listener: (event: PopStateEvent) => void): void;
 }
 
+export interface PendingOverlayGate {
+  isCurrent(): boolean;
+  promote(id: OverlayId, close: OverlayCloseCallback): boolean;
+  cancel(): void;
+}
+
 function markerFromState(state: unknown): OverlayMarker | null {
   if (!state || typeof state !== 'object') return null;
   const marker = (state as Record<string, unknown>)[OVERLAY_STATE_KEY];
   if (!marker || typeof marker !== 'object') return null;
   const { id, token } = marker as Partial<OverlayMarker>;
-  return typeof id === 'string' && typeof token === 'string' ? { id, token } : null;
+  return isOverlayId(id) && typeof token === 'string' ? { id, token } : null;
+}
+
+function isOverlayId(value: unknown): value is OverlayId {
+  return value === 'menu'
+    || value === 'region'
+    || value === 'search'
+    || value === 'search-pending'
+    || value === 'settings'
+    || value === 'settings-pending'
+    || value === 'map-popup'
+    || value === 'deep-dive';
 }
 
 function withMarker(state: unknown, marker: OverlayMarker): Record<string, unknown> {
@@ -45,9 +75,13 @@ function withoutMarker(state: unknown): Record<string, unknown> {
  */
 export class OverlayHistoryManager {
   private entries: OverlayEntry[] = [];
-  private readonly listeners = new Set<(top: string | null) => void>();
+  private readonly listeners = new Set<(top: OverlayId | null) => void>();
+  private readonly pendingOperations: Array<() => void> = [];
+  private popPending = false;
+  private pendingGeneration = 0;
   private nextToken = 0;
   private readonly handlePopState = (event: PopStateEvent): void => {
+    this.popPending = false;
     const destination = markerFromState(event.state);
     const destinationIndex = destination
       ? this.entries.findIndex((entry) => entry.token === destination.token)
@@ -56,74 +90,142 @@ export class OverlayHistoryManager {
     if (destination && destinationIndex === -1) {
       // Forward navigation must not resurrect UI that no longer exists.
       this.environment.replaceState(withoutMarker(event.state));
+      this.flushPendingOperations();
       return;
     }
 
     const closing = this.entries.splice(destinationIndex + 1).reverse();
-    for (const entry of closing) entry.closeFromHistory();
+    for (const entry of closing) entry.close('history');
     this.notify();
+    this.flushPendingOperations();
   };
 
   constructor(private readonly environment: OverlayHistoryEnvironment) {
     this.environment.addPopStateListener(this.handlePopState);
   }
 
-  public open(id: string, closeFromHistory: () => void): void {
+  public open(id: OverlayId, close: OverlayCloseCallback): void {
+    if (this.deferUntilPop(() => this.open(id, close))) return;
     const existingIndex = this.entries.findIndex((entry) => entry.id === id);
     if (existingIndex >= 0) {
       const existing = this.entries[existingIndex];
-      if (existing) existing.closeFromHistory = closeFromHistory;
+      if (existing) existing.close = close;
       return;
     }
     const entry: OverlayEntry = {
       id,
       token: `wm-overlay-${++this.nextToken}`,
-      closeFromHistory,
+      close,
     };
     this.entries.push(entry);
     this.environment.pushState(withMarker(this.environment.state, { id: entry.id, token: entry.token }));
     this.notify();
   }
 
-  public replace(fromId: string, id: string, closeFromHistory: () => void): void {
+  public replace(fromId: OverlayId, id: OverlayId, close: OverlayCloseCallback): void {
+    if (this.deferUntilPop(() => this.replace(fromId, id, close))) return;
     const top = this.entries[this.entries.length - 1];
     if (!top || top.id !== fromId) {
-      this.open(id, closeFromHistory);
+      this.open(id, close);
       return;
     }
     const entry: OverlayEntry = {
       id,
       token: `wm-overlay-${++this.nextToken}`,
-      closeFromHistory,
+      close,
     };
     this.entries[this.entries.length - 1] = entry;
     this.environment.replaceState(withMarker(this.environment.state, { id: entry.id, token: entry.token }));
     this.notify();
   }
 
-  public close(id: string): void {
-    const index = this.entries.findIndex((entry) => entry.id === id);
-    if (index === -1) return;
-    const [entry] = this.entries.splice(index, 1);
-    if (!entry) return;
-    const current = markerFromState(this.environment.state);
-    if (index === this.entries.length && current?.token === entry.token) {
-      this.environment.back();
+  public replaceInPlace(fromId: OverlayId, id: OverlayId, close: OverlayCloseCallback): void {
+    if (this.deferUntilPop(() => this.replaceInPlace(fromId, id, close))) return;
+    const top = this.entries[this.entries.length - 1];
+    if (!top || top.id !== fromId) {
+      this.open(id, close);
+      return;
     }
+    const replaced = top.close;
+    const entry: OverlayEntry = {
+      id,
+      token: `wm-overlay-${++this.nextToken}`,
+      close,
+    };
+    this.entries[this.entries.length - 1] = entry;
+    this.environment.replaceState(withMarker(this.environment.state, { id: entry.id, token: entry.token }));
+    replaced('replacement');
     this.notify();
   }
 
-  public top(): string | null {
+  public beginPending(
+    id: OverlayId,
+    replaceOverlayId: OverlayId | undefined,
+    onCancel: () => void,
+  ): PendingOverlayGate {
+    const generation = ++this.pendingGeneration;
+    let registered = false;
+    const invalidate = () => {
+      if (this.pendingGeneration !== generation) return;
+      this.pendingGeneration += 1;
+      onCancel();
+    };
+    const register = () => {
+      if (this.pendingGeneration !== generation) return;
+      registered = true;
+      if (replaceOverlayId) this.replaceInPlace(replaceOverlayId, id, invalidate);
+      else this.open(id, invalidate);
+    };
+    if (!this.deferUntilPop(register)) register();
+    return {
+      isCurrent: () => this.pendingGeneration === generation && (!registered || this.top() === id),
+      promote: (nextId, close) => {
+        if (this.pendingGeneration !== generation || !registered || this.top() !== id) return false;
+        this.replace(id, nextId, close);
+        return true;
+      },
+      cancel: () => {
+        if (this.pendingGeneration !== generation) return;
+        invalidate();
+        if (registered && this.top() === id) this.close(id);
+      },
+    };
+  }
+
+  public close(id: OverlayId): void {
+    const entry = this.entries.find((candidate) => candidate.id === id);
+    if (!entry) return;
+    if (this.popPending) {
+      this.pendingOperations.push(() => this.closeToken(entry.token));
+      return;
+    }
+    this.closeToken(entry.token);
+  }
+
+  public dismiss(id: OverlayId): void {
+    const entry = this.entries.find((candidate) => candidate.id === id);
+    if (!entry) return;
+    if (this.popPending) {
+      this.pendingOperations.push(() => this.dismissToken(entry.token));
+      return;
+    }
+    this.dismissToken(entry.token);
+  }
+
+  public top(): OverlayId | null {
     return this.entries[this.entries.length - 1]?.id ?? null;
   }
 
-  public subscribe(listener: (top: string | null) => void): () => void {
+  public subscribe(listener: (top: OverlayId | null) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
   public reset(): void {
     this.entries = [];
+    this.pendingOperations.length = 0;
+    this.popPending = false;
+    this.pendingGeneration += 1;
     if (markerFromState(this.environment.state)) {
       this.environment.replaceState(withoutMarker(this.environment.state));
     }
@@ -134,6 +236,40 @@ export class OverlayHistoryManager {
     this.reset();
     this.environment.removePopStateListener(this.handlePopState);
     this.listeners.clear();
+  }
+
+  private closeToken(token: string): void {
+    const index = this.entries.findIndex((entry) => entry.token === token);
+    if (index === -1) return;
+    const [entry] = this.entries.splice(index, 1);
+    if (!entry) return;
+    const current = markerFromState(this.environment.state);
+    if (index === this.entries.length && current?.token === entry.token) {
+      this.popPending = true;
+      this.environment.back();
+    }
+    this.notify();
+  }
+
+  private dismissToken(token: string): void {
+    const entry = this.entries.find((candidate) => candidate.token === token);
+    if (!entry) return;
+    this.closeToken(token);
+    entry.close('replacement');
+  }
+
+  private deferUntilPop(operation: () => void): boolean {
+    if (!this.popPending) return false;
+    this.pendingOperations.push(operation);
+    return true;
+  }
+
+  private flushPendingOperations(): void {
+    while (!this.popPending) {
+      const operation = this.pendingOperations.shift();
+      if (!operation) return;
+      operation();
+    }
   }
 
   private notify(): void {

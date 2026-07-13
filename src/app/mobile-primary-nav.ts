@@ -6,10 +6,14 @@ import { SITE_VARIANT } from '@/config';
 import { getAuthState, subscribeAuthState } from '@/services/auth-state';
 import { track, trackMapViewChange, trackThemeChanged } from '@/services/analytics';
 import { getCurrentTheme, setTheme, showToast } from '@/utils';
-import { overlayHistory } from '@/utils/overlay-history';
+import {
+  overlayHistory,
+  type OverlayCloseOrigin,
+  type OverlayId,
+} from '@/utils/overlay-history';
 
 type MobilePrimaryNavCallbacks = {
-  openSearch(options: { replaceOverlayId?: string; historyPending: true }): void;
+  openSearch(options: { replaceOverlayId?: OverlayId; historyPending: true }): void;
   navigateToVariant(variant: string, options: { isLocalDev: boolean }): Promise<void>;
   openMission(anchor: HTMLElement): void;
 };
@@ -68,7 +72,7 @@ export class MobilePrimaryNav {
     if (label) label.textContent = isDark ? 'Light Mode' : 'Dark Mode';
   }
 
-  closeMenu(fromHistory = false): void {
+  closeMenu(origin: OverlayCloseOrigin = 'control'): void {
     const overlay = document.getElementById('mobileMenuOverlay');
     const menu = document.getElementById('mobileMenu');
     if (!overlay || !menu) return;
@@ -78,7 +82,7 @@ export class MobilePrimaryNav {
     overlay.classList.remove('open');
     const sheetOpen = document.getElementById('regionBottomSheet')?.classList.contains('open');
     if (!sheetOpen) document.body.style.overflow = '';
-    if (!fromHistory) overlayHistory.close('menu');
+    if (origin === 'control') overlayHistory.close('menu');
   }
 
   destroy(): void {
@@ -102,6 +106,8 @@ export class MobilePrimaryNav {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-mobile-tab]');
       const tab = button?.dataset.mobileTab;
       if (!tab) return;
+      const replaceOverlayId = this.reconcileOverlayForTab(tab);
+      if (replaceOverlayId === null) return;
 
       switch (tab) {
         case 'today':
@@ -118,11 +124,9 @@ export class MobilePrimaryNav {
         }
         case 'search': {
           this.exitMap();
-          const replacesMenu = document.getElementById('mobileMenu')?.classList.contains('open') ?? false;
-          this.closeMenu(replacesMenu);
           track('search-open', { source: 'mobile-tab' });
           this.callbacks.openSearch({
-            replaceOverlayId: replacesMenu ? 'menu' : undefined,
+            replaceOverlayId,
             historyPending: true,
           });
           break;
@@ -143,7 +147,7 @@ export class MobilePrimaryNav {
         }
         case 'more':
           this.exitMap();
-          this.openMenu();
+          this.openMenu(replaceOverlayId);
           break;
         default:
           return;
@@ -170,11 +174,9 @@ export class MobilePrimaryNav {
       }, options);
     });
     document.getElementById('mobileMenuRegion')?.addEventListener('click', () => {
-      this.closeMenu(true);
-      this.openRegion(true);
+      this.openRegion('menu');
     }, options);
     document.getElementById('mobileMenuSettings')?.addEventListener('click', () => {
-      this.closeMenu(true);
       this.ctx.unifiedSettings?.open(undefined, 'menu', true);
     }, options);
     document.getElementById('mobileMenuTheme')?.addEventListener('click', () => {
@@ -215,7 +217,7 @@ export class MobilePrimaryNav {
     this.closeRegion();
   }
 
-  private openMenu(fromHistory = false): void {
+  private openMenu(replaceOverlayId?: OverlayId): void {
     const overlay = document.getElementById('mobileMenuOverlay');
     const menu = document.getElementById('mobileMenu');
     if (!overlay || !menu) return;
@@ -226,10 +228,12 @@ export class MobilePrimaryNav {
       menu.classList.add('open');
     });
     document.body.style.overflow = 'hidden';
-    if (!fromHistory) overlayHistory.open('menu', () => this.closeMenu(true));
+    const close = (origin: OverlayCloseOrigin) => this.closeMenu(origin);
+    if (replaceOverlayId) overlayHistory.replaceInPlace(replaceOverlayId, 'menu', close);
+    else overlayHistory.open('menu', close);
   }
 
-  private openRegion(replaceMenu = false): void {
+  private openRegion(replaceOverlayId?: OverlayId): void {
     const backdrop = document.getElementById('regionSheetBackdrop');
     const sheet = document.getElementById('regionBottomSheet');
     if (!backdrop || !sheet) return;
@@ -240,12 +244,12 @@ export class MobilePrimaryNav {
       sheet.classList.add('open');
     });
     document.body.style.overflow = 'hidden';
-    const closeFromHistory = () => this.closeRegion(true);
-    if (replaceMenu) overlayHistory.replace('menu', 'region', closeFromHistory);
-    else overlayHistory.open('region', closeFromHistory);
+    const close = (origin: OverlayCloseOrigin) => this.closeRegion(origin);
+    if (replaceOverlayId) overlayHistory.replaceInPlace(replaceOverlayId, 'region', close);
+    else overlayHistory.open('region', close);
   }
 
-  private closeRegion(fromHistory = false): void {
+  private closeRegion(origin: OverlayCloseOrigin = 'control'): void {
     const backdrop = document.getElementById('regionSheetBackdrop');
     const sheet = document.getElementById('regionBottomSheet');
     if (!backdrop || !sheet) return;
@@ -254,7 +258,27 @@ export class MobilePrimaryNav {
     sheet.classList.remove('open');
     backdrop.classList.remove('open');
     document.body.style.overflow = '';
-    if (!fromHistory) overlayHistory.close('region');
+    if (origin === 'control') overlayHistory.close('region');
+  }
+
+  private reconcileOverlayForTab(tab: string): OverlayId | undefined | null {
+    const top = overlayHistory.top();
+    if (!top) return undefined;
+
+    const isSearchOverlay = top === 'search' || top === 'search-pending';
+    const isMoreOverlay = top === 'menu'
+      || top === 'region'
+      || top === 'settings'
+      || top === 'settings-pending';
+    if ((tab === 'search' && isSearchOverlay) || (tab === 'more' && isMoreOverlay)) {
+      overlayHistory.dismiss(top);
+      this.setActive('today');
+      return null;
+    }
+
+    if (tab === 'search' || tab === 'more') return top;
+    overlayHistory.dismiss(top);
+    return undefined;
   }
 
   private exitMap(): void {

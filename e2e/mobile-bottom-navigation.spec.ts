@@ -79,6 +79,23 @@ test.describe('mobile primary navigation (#5201 P0)', () => {
     await expect(page.locator('#mobileMenu')).not.toHaveClass(/open/);
   });
 
+  test('reconciles open overlays before primary-tab actions and toggles re-taps closed', async ({ page }) => {
+    const searchTab = page.locator('[data-mobile-tab="search"]');
+    const search = page.locator('.search-overlay.search-mobile');
+    await searchTab.click();
+    await expect(search).toHaveClass(/open/);
+
+    await searchTab.click();
+    await expect(search).toHaveCount(0);
+    await expect(page.locator('[data-mobile-tab="today"]')).toHaveAttribute('aria-current', 'page');
+
+    await page.locator('[data-mobile-tab="more"]').click();
+    await expect(page.locator('#mobileMenu')).toHaveClass(/open/);
+    await page.locator('[data-mobile-tab="alerts"]').click();
+    await expect(page.locator('#mobileMenu')).not.toHaveClass(/open/);
+    await expect(page.locator('[data-mobile-tab="alerts"]')).toHaveAttribute('aria-current', 'page');
+  });
+
   test('Back cancels a pending lazy Search transition', async ({ page }) => {
     let releaseSearch!: () => void;
     const searchReleased = new Promise<void>((resolve) => { releaseSearch = resolve; });
@@ -140,6 +157,10 @@ test.describe('mobile primary navigation (#5201 P0)', () => {
     const confirm = page.locator('.confirm-dialog-overlay');
     await expect(confirm).toHaveCount(1);
     await expect(confirm).toHaveClass(/active/);
+    await page.evaluate(() => history.back());
+    await expect(confirm).toHaveCount(1);
+    await expect(settings).toHaveClass(/active/);
+    await expect.poll(async () => page.evaluate(() => history.state?.__wmOverlay?.id ?? null)).toBe('settings');
     await page.keyboard.press('Escape');
     await expect(confirm).toHaveCount(0);
     await expect(settings).toHaveClass(/active/);

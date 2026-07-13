@@ -5,7 +5,11 @@ import { trackSearchUsed } from '@/services/analytics';
 import { getAllCommands, type Command } from '@/config/commands';
 import { isMobileDevice } from '@/utils';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
-import { overlayHistory } from '@/utils/overlay-history';
+import {
+  overlayHistory,
+  type OverlayCloseOrigin,
+  type OverlayId,
+} from '@/utils/overlay-history';
 
 
 interface CommandResult {
@@ -205,7 +209,7 @@ export class SearchModal {
     this.layerExecutableFn = fn;
   }
 
-  public open(replaceOverlayId?: string): void {
+  public open(replaceOverlayId?: OverlayId): void {
     if (this.closeTimeoutId) {
       clearTimeout(this.closeTimeoutId);
       this.closeTimeoutId = null;
@@ -223,20 +227,20 @@ export class SearchModal {
     this.input?.focus();
     this.showingAllCommands = false;
     if (this.isMobile) {
-      const closeFromHistory = () => this.close(true);
-      if (replaceOverlayId) overlayHistory.replace(replaceOverlayId, 'search', closeFromHistory);
-      else overlayHistory.open('search', closeFromHistory);
+      const close = (origin: OverlayCloseOrigin) => this.close(origin);
+      if (replaceOverlayId) overlayHistory.replace(replaceOverlayId, 'search', close);
+      else overlayHistory.open('search', close);
       this.scheduleMobileInitialPopulation();
     } else {
       this.showRecentOrEmpty();
     }
   }
 
-  public close(fromHistory = false): void {
+  public close(origin: OverlayCloseOrigin = 'control'): void {
     // Drop any pending debounced search so it can't fire against a torn-down modal.
     this.debouncedSearch.cancel();
     this.mobileInitialPopulationGeneration += 1;
-    if (this.isMobile && !fromHistory) overlayHistory.close('search');
+    if (this.isMobile && origin === 'control') overlayHistory.close('search');
     if (this.viewportHandler && window.visualViewport) {
       window.visualViewport.removeEventListener('resize', this.viewportHandler);
       this.viewportHandler = null;

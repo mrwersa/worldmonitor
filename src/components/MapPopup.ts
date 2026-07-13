@@ -27,7 +27,7 @@ import { getAuthState } from '@/services/auth-state';
 import { hasPremiumAccess } from '@/services/panel-gating';
 import { trackGateHit } from '@/services/analytics';
 import { renderPopupSourceLinks } from './map-popup-source-links';
-import { overlayHistory } from '@/utils/overlay-history';
+import { overlayHistory, type OverlayCloseOrigin } from '@/utils/overlay-history';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 
 
@@ -249,7 +249,7 @@ export class MapPopup {
   }
 
   public show(data: PopupData): void {
-    this.hide(true);
+    this.hide('replacement');
 
     this.isMobileSheet = isMobileDevice();
     this.popup = document.createElement('div');
@@ -359,7 +359,7 @@ export class MapPopup {
     });
 
     if (this.isMobileSheet) {
-      overlayHistory.open('map-popup', () => this.hide(true));
+      overlayHistory.open('map-popup', (origin) => this.hide(origin));
       this.popup.addEventListener('touchstart', this.handleSheetTouchStart, { passive: true });
       this.popup.addEventListener('touchmove', this.handleSheetTouchMove, { passive: false });
       this.popup.addEventListener('touchend', this.handleSheetTouchEnd);
@@ -594,7 +594,7 @@ export class MapPopup {
     this.popup.classList.add('open');
   };
 
-  public hide(fromHistory = false): void {
+  public hide(origin: OverlayCloseOrigin = 'control'): void {
     this.transitChart?.destroy();
     this.transitChart = null;
 
@@ -604,7 +604,7 @@ export class MapPopup {
     }
 
     if (this.popup) {
-      if (this.isMobileSheet && !fromHistory) overlayHistory.close('map-popup');
+      if (this.isMobileSheet && origin === 'control') overlayHistory.close('map-popup');
       this.popup.removeEventListener('touchstart', this.handleSheetTouchStart);
       this.popup.removeEventListener('touchmove', this.handleSheetTouchMove);
       this.popup.removeEventListener('touchend', this.handleSheetTouchEnd);

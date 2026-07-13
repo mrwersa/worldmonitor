@@ -34,7 +34,11 @@ import {
   type ApiPlanLimitNotice,
 } from '@/services/api-plan-limit-notices';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
-import { overlayHistory } from '@/utils/overlay-history';
+import {
+  overlayHistory,
+  type OverlayCloseOrigin,
+  type OverlayId,
+} from '@/utils/overlay-history';
 import { isMobileDevice } from '@/utils';
 
 
@@ -324,7 +328,7 @@ export class UnifiedSettings {
     document.body.appendChild(this.overlay);
   }
 
-  public open(tab?: TabId, replaceOverlayId?: string): void {
+  public open(tab?: TabId, replaceOverlayId?: OverlayId): void {
     if (tab) this.activeTab = tab;
     this.resetPanelDraft();
     // Seed entitlementReady BEFORE render() so the first paint of
@@ -335,9 +339,9 @@ export class UnifiedSettings {
     this.overlay.classList.add('active');
     if (isMobileDevice()) {
       this.historyRegistered = true;
-      const closeFromHistory = () => this.close(true);
-      if (replaceOverlayId) overlayHistory.replace(replaceOverlayId, 'settings', closeFromHistory);
-      else overlayHistory.open('settings', closeFromHistory);
+      const close = (origin: OverlayCloseOrigin) => this.close(origin);
+      if (replaceOverlayId) overlayHistory.replace(replaceOverlayId, 'settings', close);
+      else overlayHistory.open('settings', close);
     }
     localStorage.setItem('wm-settings-open', '1');
     document.addEventListener('keydown', this.escapeHandler);
@@ -392,29 +396,29 @@ export class UnifiedSettings {
     if (next) upgradeSection.replaceWith(next);
   }
 
-  public close(fromHistory = false): void {
-    if (fromHistory) this.historyRegistered = false;
+  public close(origin: OverlayCloseOrigin = 'control'): void {
+    if (origin === 'history') this.historyRegistered = false;
     // Unsaved panel changes → confirm before tearing down. The confirm is a
     // non-blocking in-app dialog (#4559): close() stays synchronous (8 callers)
     // and defers teardown to the user's choice instead of a blocking confirm().
-    if (this.hasPendingPanelChanges()) {
-      if (fromHistory && !this.historyRegistered && !this.confirmingClose) {
+    if (origin !== 'replacement' && this.hasPendingPanelChanges()) {
+      if (origin === 'history' && !this.historyRegistered) {
         this.historyRegistered = true;
-        overlayHistory.open('settings', () => this.close(true));
+        overlayHistory.open('settings', (nextOrigin) => this.close(nextOrigin));
       }
       if (this.confirmingClose) return; // a confirm is already on screen
       this.confirmingClose = true;
       void confirmDialog({ message: t('header.unsavedChanges') }).then((discard) => {
         this.confirmingClose = false;
-        if (discard) this.teardownSettings(false);
+        if (discard) this.teardownSettings('control');
       });
       return;
     }
-    this.teardownSettings(fromHistory);
+    this.teardownSettings(origin);
   }
 
-  private teardownSettings(fromHistory = false): void {
-    if (!fromHistory && this.historyRegistered) {
+  private teardownSettings(origin: OverlayCloseOrigin = 'control'): void {
+    if (origin === 'control' && this.historyRegistered) {
       overlayHistory.close('settings');
     }
     this.historyRegistered = false;

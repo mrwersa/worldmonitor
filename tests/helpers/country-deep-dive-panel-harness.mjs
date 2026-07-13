@@ -385,7 +385,7 @@ export async function createCountryDeepDivePanelHarness(options = {}) {
       const entry = state.historyEntry;
       state.historyEntry = null;
       state.forwardHistoryEntry = entry;
-      entry?.closeFromHistory();
+      entry?.closeFromHistory('history');
       return entry?.id ?? null;
     },
     historyForward() {

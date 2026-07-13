@@ -93,7 +93,7 @@ import { scheduleAfterFirstPaint } from '@/utils/after-paint';
 import { escapeHtml } from '@/utils/sanitize';
 import { buildEmbedIframeSnippet, buildEmbedMapUrl, type EmbedVariant } from '@/embed/embed-url';
 import { createSettingsButton } from '@/components/settings-button';
-import { overlayHistory } from '@/utils/overlay-history';
+import { overlayHistory, type OverlayId } from '@/utils/overlay-history';
 import { MobilePrimaryNav } from '@/app/mobile-primary-nav';
 
 function readStorageValue(key: string): string | null {
@@ -137,24 +137,22 @@ class LazyUnifiedSettings implements UnifiedSettingsController {
     return this.button;
   }
 
-  open(tab?: UnifiedSettingsTabId, replaceOverlayId?: string, historyPending = false): void {
+  open(tab?: UnifiedSettingsTabId, replaceOverlayId?: OverlayId, historyPending = false): void {
     const epoch = ++this.openEpoch;
-    const pendingId = 'settings-pending';
-    if (historyPending) {
-      const cancel = () => { this.openEpoch += 1; };
-      if (replaceOverlayId) overlayHistory.replace(replaceOverlayId, pendingId, cancel);
-      else overlayHistory.open(pendingId, cancel);
-    }
+    const pendingId: OverlayId = 'settings-pending';
+    const pendingGate = historyPending
+      ? overlayHistory.beginPending(pendingId, replaceOverlayId, () => { this.openEpoch += 1; })
+      : null;
     void this.load().then((settings) => {
       if (this.destroyed || this.openEpoch !== epoch) return;
-      if (historyPending && overlayHistory.top() !== pendingId) return;
-      settings.open(tab, historyPending ? pendingId : replaceOverlayId);
+      if (pendingGate && !pendingGate.isCurrent()) return;
+      settings.open(tab, pendingGate ? pendingId : replaceOverlayId);
     }).catch((error) => {
       // A rejection because the controller was torn down mid-load is a
       // deliberate unmount, not a failure the user should be toasted about.
       if (this.destroyed) return;
       console.warn('[settings] Failed to load settings window:', error);
-      if (historyPending) overlayHistory.close(pendingId);
+      pendingGate?.cancel();
       showToast(t('common.error'));
     });
   }
@@ -196,7 +194,7 @@ class LazyUnifiedSettings implements UnifiedSettingsController {
 
 
 export interface EventHandlerCallbacks {
-  openSearch: (options?: { toggle?: boolean; replaceOverlayId?: string; historyPending?: boolean }) => void;
+  openSearch: (options?: { toggle?: boolean; replaceOverlayId?: OverlayId; historyPending?: boolean }) => void;
   updateSearchIndex: () => void;
   updateFlightSource?: (adsb: PositionSample[], military: MilitaryFlight[]) => void;
   loadAllData: () => Promise<void>;
