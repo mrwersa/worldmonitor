@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -54,7 +54,7 @@ describe('USPTO ODP defense-patent source', () => {
       title: 'SATELLITE COMMUNICATION METHOD AND APPARATUS',
       date: '2026-03-05',
       assignee: 'Raytheon Company',
-      cpcCode: 'H04B7/18513',
+      cpcCode: 'H04B',
       cpcDesc: H04B.desc,
       abstract: '',
       url: 'https://patents.google.com/patent/US20260197796A1',
@@ -159,5 +159,29 @@ describe('defense-patents deployment wiring', () => {
     assert.match(source, /seedMetaKey:\s*'military:defense-patents'/);
     assert.match(source, /canonicalKey:\s*'patents:defense:latest'/);
     assert.match(source, /intervalMs:\s*WEEK/);
+  });
+
+  it('keeps the empty abstract compatibility contract explicit in generated API docs', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const root = join(here, '..');
+    const proto = readFileSync(join(root, 'proto/worldmonitor/military/v1/list_defense_patents.proto'), 'utf8');
+    const openapi = JSON.parse(readFileSync(join(root, 'docs/api/MilitaryService.openapi.json'), 'utf8'));
+    const abstractSchema = openapi.components.schemas.DefensePatentFiling.properties.abstract;
+    const responseExample = openapi.paths['/api/military/v1/list-defense-patents']
+      .get.responses['200'].content['application/json'].example;
+
+    assert.match(proto, /Always empty because[\s\S]*string abstract = 7/);
+    assert.match(abstractSchema.description, /Always empty because/);
+    assert.equal(responseExample.patents[0].abstract, '');
+  });
+
+  it('does not attribute any app locale to the retired PatentsView source', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const localeDir = join(here, '..', 'src', 'locales');
+    const localeFiles = readdirSync(localeDir).filter((file) => file.endsWith('.json'));
+
+    for (const file of localeFiles) {
+      assert.doesNotMatch(readFileSync(join(localeDir, file), 'utf8'), /PatentsView/i, file);
+    }
   });
 });

@@ -63,11 +63,7 @@ export function mapPatentApplication(record, category) {
   const applicant = metadata.firstApplicantName
     ?? metadata.applicantBag?.[0]?.applicantNameText
     ?? '';
-  const cpcCodes = Array.isArray(metadata.cpcClassificationBag)
-    ? metadata.cpcClassificationBag.map(normalizeCpc).filter(Boolean)
-    : [];
   const categoryCode = normalizeCpc(category?.code);
-  const cpcCode = cpcCodes.find((code) => code.startsWith(categoryCode)) ?? categoryCode;
 
   const googlePatentId = publicationNumber || grantNumber;
   const url = googlePatentId
@@ -79,10 +75,10 @@ export function mapPatentApplication(record, category) {
     title: String(metadata.inventionTitle ?? '').slice(0, 300),
     date,
     assignee: String(applicant).slice(0, 200),
-    cpcCode,
+    cpcCode: categoryCode,
     cpcDesc: String(category?.desc ?? ''),
-    // Patent File Wrapper search metadata does not include abstracts. Preserve
-    // the existing response shape and let the panel render the title metadata.
+    // Patent File Wrapper search metadata does not include abstracts. Keep the
+    // field present for wire compatibility; the public contract marks it empty.
     abstract: '',
     url,
   };
