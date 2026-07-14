@@ -1283,6 +1283,58 @@ export function computeRecordCount({ opts = {}, data, payloadBytes = 0, topicArt
   return 0;
 }
 
+/**
+ * Significant digits kept in a seeded sparkline series.
+ *
+ * Yahoo returns closes as float32 values widened to float64, so JSON.stringify emits the
+ * conversion noise verbatim: `17.209999084472656` — 18 characters to express 17.21. It is
+ * ~50% of every quote payload we seed, and those payloads sit in the bootstrap FAST tier,
+ * which takes ~5x more CDN origin misses than the slow tier. Measured 2026-07-14:
+ *
+ *   market:commodities-bootstrap:v1  241,869 B  — 12,238 noisy floats, 53% of the key
+ *   market:stocks-bootstrap:v1       187,834 B  —  7,858 noisy floats, 42% of the key
+ *   market:gulf-quotes:v1             57,289 B  —  2,783 noisy floats, 51% of the key
+ *
+ * SIGNIFICANT digits, not decimal places: commodities carries FX pairs (AUDUSD=X at 0.69),
+ * which a fixed 2dp round would flatten into a straight line.
+ *
+ * 7 chosen by sweeping every live series through the REAL renderer (src/utils/sparkline.ts)
+ * and diffing the SVG it emits:
+ *
+ *   sig │ commodities │ stocks │ worst shift
+ *    4  │     36%     │  37%   │  1.90px   <- visibly wrong
+ *    6  │     43%     │  46%   │  0.10px
+ *    7  │     44%     │  47%   │  0.00px (commodities 31/31 SVG byte-identical)
+ *
+ * At 7 digits the worst deviation anywhere is 0.10px — exactly ONE unit of the renderer's
+ * own `toFixed(1)` coordinate quantum, i.e. the smallest difference the SVG can express, on
+ * an 18px-tall chart. Dropping to 6 saves only ~2% more bytes and byte-matches fewer series,
+ * so 7 is the better trade.
+ *
+ * Precision is the ONLY safe lever here. Downsampling was measured and REJECTED: miniSparkline
+ * autoscales each series to its own min/max, so dropping any extreme rescales the whole curve
+ * — 96-point resampling moved the median series 3-4px and cost USDTRY=X 40% of its vertical
+ * range. See tests/sparkline-precision.test.mjs.
+ */
+export const SPARKLINE_SIGNIFICANT_DIGITS = 7;
+
+/** Round one value to `sig` significant digits, preserving magnitude across price scales. */
+function toSignificantDigits(value, sig) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) return value;
+  // toPrecision returns a string (possibly exponential); Number() normalises it back and
+  // drops the trailing zeros, so JSON.stringify emits the shortest form.
+  return Number(value.toPrecision(sig));
+}
+
+/**
+ * Strip float64 conversion noise from a sparkline series. Non-arrays and non-finite entries
+ * pass through untouched, so a malformed upstream response degrades exactly as it does today.
+ */
+export function roundSparkline(values, sig = SPARKLINE_SIGNIFICANT_DIGITS) {
+  if (!Array.isArray(values)) return values;
+  return values.map((v) => toSignificantDigits(v, sig));
+}
+
 export function parseYahooChart(data, symbol) {
   const result = data?.chart?.result?.[0];
   const meta = result?.meta;
@@ -1292,7 +1344,7 @@ export function parseYahooChart(data, symbol) {
   const prevClose = meta.chartPreviousClose || meta.previousClose || price;
   const change = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
   const closes = result.indicators?.quote?.[0]?.close;
-  const sparkline = Array.isArray(closes) ? closes.filter((v) => v != null) : [];
+  const sparkline = roundSparkline(Array.isArray(closes) ? closes.filter((v) => v != null) : []);
 
   return { symbol, name: symbol, display: symbol, price, change: +change.toFixed(2), sparkline };
 }
