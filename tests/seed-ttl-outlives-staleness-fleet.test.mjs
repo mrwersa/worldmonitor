@@ -19,17 +19,17 @@
 //
 // ── Why there is an allowlist, and what it does and does not mean ──────────────
 //
-// 50 seeders currently violate this. They are NOT all broken. `maxStaleMin` is only
+// 51 seeders currently violate this. They are NOT all broken. `maxStaleMin` is only
 // a PROXY for the cron cadence, and it is a leaky one: several of these have TTLs
 // that are 4-6x their ACTUAL refresh interval and are in no danger of losing data —
 // they simply have a generous maxStaleMin. Verified against the live Railway crons:
 //
 //   seed-commodity-quotes   cron */5    ttl 30min  = 6x interval  (safe)
 //   seed-economy            cron */15   ttl 60min  = 4x interval  (safe)
-//   seed-thermal-escalation cron 0 */3  ttl 6h     = 2x interval  (survives a miss)
+//   seed-thermal-escalation cron 0 */3  ttl 9h     = 3x interval  (retired this PR)
 //   seed-conflict-intel     cron */15   ttl 15min  = 1x interval  (THE BUG, fixed)
 //
-// So raising all 50 TTLs would trade real cost (memory, staler data served) for a
+// So raising all 51 TTLs would trade real cost (memory, staler data served) for a
 // cosmetic severity signal. Instead this test RATCHETS: the existing violations are
 // frozen as visible debt, and no NEW one can be introduced. Adding a seeder here is
 // a deliberate act that shows up in review.
@@ -79,6 +79,7 @@ const KNOWN_VIOLATIONS = new Set([
   'seed-imf-labor.mjs',
   'seed-imf-macro.mjs',
   'seed-iran-events.mjs',
+  'seed-jodi-gas.mjs',
   'seed-market-quotes.mjs',
   'seed-portwatch-chokepoints-ref.mjs',
   'seed-portwatch-disruptions.mjs',
@@ -86,6 +87,7 @@ const KNOWN_VIOLATIONS = new Set([
   'seed-recovery-external-debt.mjs',
   'seed-recovery-fiscal-space.mjs',
   'seed-recovery-reserve-adequacy.mjs',
+  'seed-research.mjs',
   'seed-sovereign-wealth.mjs',
   'seed-spr-policies.mjs',
   'seed-submarine-cables.mjs',
@@ -114,8 +116,11 @@ function auditSeeders() {
   const audited = [];
   for (const file of readdirSync(SCRIPTS).filter((f) => /^seed-.*\.mjs$/.test(f))) {
     const src = readFileSync(join(SCRIPTS, file), 'utf8');
-    const ttlM = src.match(/ttlSeconds:\s*([^,\n]+)/);
-    const staleM = src.match(/maxStaleMin:\s*([^,\n]+)/);
+    // Match option lines, not arbitrary prose. Several seeders explain health
+    // thresholds in comments before their runSeed config; a broad search would
+    // read the comment and silently skip the seeder when it is not parseable.
+    const ttlM = src.match(/^\s*ttlSeconds:\s*([^,\n]+)/m);
+    const staleM = src.match(/^\s*maxStaleMin:\s*([^,\n]+)/m);
     if (!ttlM || !staleM) continue;                     // seeder declares only one — out of scope
     const ttl = resolveValue(ttlM[1], src);
     const maxStaleMin = resolveValue(staleM[1], src);
@@ -139,6 +144,14 @@ test('no NEW seeder lets its data expire before its own staleness gate', () => {
     fresh.map((v) => `${v.file} (ttl=${v.ttl}s <= maxStaleMin=${v.maxStaleMin}min)`),
     [],
     'a seeded key must outlive its staleness gate, or a merely-late seeder reports as an EMPTY crit',
+  );
+});
+
+test('the audit reads config options rather than prose comments', () => {
+  const { audited } = auditSeeders();
+  assert.ok(
+    audited.includes('seed-aviation.mjs'),
+    'seed-aviation documents another health threshold before its runSeed options',
   );
 });
 
