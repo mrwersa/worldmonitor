@@ -250,6 +250,15 @@ test('skipWhenEmpty preserves the last-good extra key without refreshing its see
     0,
     'an empty transformed extra key must not refresh freshness metadata',
   );
+  assert.equal(
+    countSetsFor('test:extra-meta-empty:warnings'),
+    0,
+    'an empty transformed extra key must not overwrite the last-good payload',
+  );
+  assert.ok(
+    expireKeys().includes('test:extra-meta-empty:warnings'),
+    'the skipped extra key must have its TTL extended to preserve last-good data',
+  );
 });
 
 // PR #3582: When validateFn rejects a transient blip but canonical key still

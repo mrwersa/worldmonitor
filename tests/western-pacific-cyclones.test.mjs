@@ -74,6 +74,32 @@ describe('western Pacific cyclone identity', () => {
   it('rejects missing or non-numeric coordinates instead of coercing them to zero', () => {
     assert.deepEqual(canonicalizeWesternPacificCyclones([storm({ lat: null })]), []);
     assert.deepEqual(canonicalizeWesternPacificCyclones([storm({ lon: false })]), []);
+    assert.deepEqual(canonicalizeWesternPacificCyclones([storm({ lat: '' })]), []);
+    assert.deepEqual(canonicalizeWesternPacificCyclones([storm({ lon: '  ' })]), []);
+  });
+
+  it('keeps wind null without crashing when no observation reports wind', () => {
+    const [cyclone] = canonicalizeWesternPacificCyclones([
+      storm({ windKt: null, windAveragingPeriodMinutes: null }),
+    ]);
+
+    assert.equal(cyclone.windKt, null);
+    assert.equal(cyclone.windAveragingPeriodMinutes, undefined);
+  });
+
+  it('never takes wind from a cancelled observation while an active one exists', () => {
+    const [cyclone] = canonicalizeWesternPacificCyclones([
+      storm({ windKt: null, windAveragingPeriodMinutes: null }),
+      storm({
+        agency: 'JTWC', agencyId: '05W', aliases: ['Nari'], lat: 19.9, lon: 128.5,
+        windKt: 65, windAveragingPeriodMinutes: 1, sourceName: 'JTWC',
+        sourceUrl: 'https://www.metoc.navy.mil/', status: 'cancelled',
+      }),
+    ]);
+
+    assert.equal(cyclone.sourceName, 'JMA');
+    assert.equal(cyclone.windKt, null, 'a cancelled advisory must not supply the canonical wind');
+    assert.equal(cyclone.windAveragingPeriodMinutes, undefined);
   });
 
   it('does not merge concurrent nearby storms with distinct aliases', () => {
