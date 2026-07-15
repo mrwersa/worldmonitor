@@ -23,6 +23,8 @@ export type BootstrapR2RumResult =
   | { accepted: false; reason: BootstrapR2RumRejectReason };
 
 const SERVER_TIMING_RE = /(?:^|,)\s*wm_bootstrap_redis\s*;\s*dur\s*=\s*(\d+(?:\.\d+)?)\s*(?:,|$)/i;
+const REDIS_DURATION_RE = /^\d+(?:\.\d+)?$/;
+const REDIS_DURATION_HEADER = 'x-worldmonitor-bootstrap-redis-duration';
 const CLOUDFLARE_ORIGIN_STATES = new Set(['DYNAMIC', 'BYPASS', 'MISS']);
 
 export function selectBootstrapR2RumTier(rng: () => number = Math.random): BootstrapR2RumTier {
@@ -30,6 +32,14 @@ export function selectBootstrapR2RumTier(rng: () => number = Math.random): Boots
 }
 
 function readRedisDuration(headers: Headers): number | null | 'invalid' {
+  const rawPlatformSafeDuration = headers.get(REDIS_DURATION_HEADER);
+  if (rawPlatformSafeDuration !== null) {
+    const platformSafeDuration = rawPlatformSafeDuration.trim();
+    if (!REDIS_DURATION_RE.test(platformSafeDuration)) return 'invalid';
+    const duration = Number(platformSafeDuration);
+    return Number.isFinite(duration) && duration >= 0 ? duration : 'invalid';
+  }
+
   const raw = headers.get('server-timing');
   if (!raw) return null;
   const match = raw.match(SERVER_TIMING_RE);

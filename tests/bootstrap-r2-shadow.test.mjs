@@ -92,6 +92,7 @@ test('flag-off public tier response performs no probe and preserves the normal r
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('server-timing'), null);
+  assert.equal(response.headers.get('x-worldmonitor-bootstrap-redis-duration'), null);
   assert.equal(calls.redis, 1);
   assert.equal(calls.r2, 0);
   assert.equal(calls.axiom, 0);
@@ -107,6 +108,7 @@ test('shadow credentials are never exercised outside the production Vercel envir
   const response = await handler(makeRequest('tier=fast&public=1'), wait.ctx);
 
   assert.equal(response.headers.get('server-timing'), null);
+  assert.equal(response.headers.get('x-worldmonitor-bootstrap-redis-duration'), null);
   assert.equal(calls.redis, 1);
   assert.equal(calls.r2, 0);
   assert.equal(calls.axiom, 0);
@@ -128,6 +130,12 @@ for (const [label, r2Status, expectedOutcome, expectedReason] of [
 
     assert.equal(response.status, 200);
     assert.match(response.headers.get('server-timing') ?? '', /^wm_bootstrap_redis;dur=\d+(?:\.\d+)?$/);
+    assert.match(
+      response.headers.get('x-worldmonitor-bootstrap-redis-duration') ?? '',
+      /^\d+(?:\.\d+)?$/,
+    );
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.match(response.headers.get('cdn-cache-control') ?? '', /^public, /);
     assert.equal(calls.redis, 1);
     assert.equal(calls.r2, 1);
     assert.equal(calls.axiom, 1);
@@ -145,6 +153,7 @@ for (const [label, r2Status, expectedOutcome, expectedReason] of [
     );
     const exposed = response.headers.get('access-control-expose-headers') ?? '';
     assert.match(exposed, /Server-Timing/i);
+    assert.match(exposed, /X-WorldMonitor-Bootstrap-Redis-Duration/i);
     assert.match(exposed, /X-Vercel-Cache/i);
     assert.match(exposed, /CF-Cache-Status/i);
   });

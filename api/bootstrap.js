@@ -78,11 +78,27 @@ function shouldMeasureBootstrapR2Shadow(authKind, tier) {
 }
 
 function finishBootstrapR2ShadowResponse(req, ctx, tier, response, redisDurationMs) {
-  response.headers.set('Server-Timing', `wm_bootstrap_redis;dur=${redisDurationMs.toFixed(3)}`);
+  const serializedRedisDurationMs = redisDurationMs.toFixed(3);
+  response.headers.set('Server-Timing', `wm_bootstrap_redis;dur=${serializedRedisDurationMs}`);
+  // Vercel strips user-authored Server-Timing from Edge responses. Keep it for
+  // runtimes that preserve the standard header, but expose the same temporary
+  // U3a diagnostic through a platform-safe header so browser RUM can observe it.
+  response.headers.set('X-WorldMonitor-Bootstrap-Redis-Duration', serializedRedisDurationMs);
+  // A browser cache replay preserves the origin-MISS headers and would make a
+  // local response look like a fresh origin sample. Disable only browser
+  // storage during U3a; CDN-Cache-Control continues to shield the Vercel origin.
+  response.headers.set('Cache-Control', 'no-store');
   const exposedHeaders = response.headers.get('Access-Control-Expose-Headers');
   response.headers.set(
     'Access-Control-Expose-Headers',
-    [exposedHeaders, 'Server-Timing', 'Age', 'X-Vercel-Cache', 'CF-Cache-Status']
+    [
+      exposedHeaders,
+      'Server-Timing',
+      'X-WorldMonitor-Bootstrap-Redis-Duration',
+      'Age',
+      'X-Vercel-Cache',
+      'CF-Cache-Status',
+    ]
       .filter(Boolean)
       .join(', '),
   );

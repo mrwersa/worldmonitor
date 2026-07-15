@@ -17,6 +17,22 @@ function headers(overrides: Record<string, string> = {}): Headers {
 }
 
 describe('bootstrap R2 client RUM', () => {
+  it('accepts the platform-safe Redis duration header when Vercel strips Server-Timing', () => {
+    const result = buildBootstrapR2RumSample(
+      'fast',
+      'success',
+      300.25,
+      headers({
+        'server-timing': '',
+        'x-worldmonitor-bootstrap-redis-duration': '125.5',
+      }),
+      'mobile',
+    );
+
+    assert.equal(result.accepted, true);
+    assert.equal(result.accepted && result.sample.redis_duration_ms, 125.5);
+  });
+
   it('accepts only a same-response origin MISS and derives exact overhead', () => {
     const result = buildBootstrapR2RumSample('fast', 'success', 300.25, headers(), 'mobile');
 
@@ -66,6 +82,11 @@ describe('bootstrap R2 client RUM', () => {
     ['non-decimal zero cache age', { age: '0x0' }, 'cached-age'],
     ['fractional zero cache age', { age: '0.0' }, 'cached-age'],
     ['unknown cache age', { age: 'unknown' }, 'cached-age'],
+    [
+      'malformed platform-safe Redis timing',
+      { 'x-worldmonitor-bootstrap-redis-duration': 'nope' },
+      'invalid-server-timing',
+    ],
     ['malformed Redis timing', { 'server-timing': 'wm_bootstrap_redis;dur=nope' }, 'invalid-server-timing'],
   ] as const) {
     it(`rejects ${label}`, () => {
