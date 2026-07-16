@@ -285,6 +285,30 @@ describe('classifyOpinion — historical explainers are not digest events', () =
     );
   });
 
+  it('keeps an anniversary-timed live development with ordinary analytical framing', () => {
+    assert.equal(
+      classifyOpinion({
+        title: '10 years since the nuclear deal, Iran resumes enrichment',
+        link: 'https://example.com/world/iran-enrichment',
+        description: 'Analysts say the move continues to shape regional security.',
+        publishedAt: JULY_2026,
+      }),
+      false,
+    );
+  });
+
+  it('keeps anniversary-timed current politics described as remaining divided', () => {
+    assert.equal(
+      classifyOpinion({
+        title: '10 years on from the election, parliament remains divided on the new sanctions bill',
+        link: 'https://example.com/world/parliament-sanctions',
+        description: 'Lawmakers will vote on the measure this week.',
+        publishedAt: JULY_2026,
+      }),
+      false,
+    );
+  });
+
   it('trims the headline before matching the explanatory shape', () => {
     assert.equal(
       classifyOpinion({

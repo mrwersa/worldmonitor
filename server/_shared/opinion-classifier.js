@@ -115,12 +115,13 @@ const HISTORICAL_EXPLAINER_HEADLINE_RE =
 // Duration-led anniversary explainers use a different headline shape from the
 // How/Why form above: "10 years on from <past event>". That shape alone is not
 // enough because publishers also use it for live commemorations and new
-// enforcement actions. Require legacy/lasting-impact framing in the title or
-// description as the second, retrospective signal.
+// enforcement actions. Require explicit legacy/lasting-impact framing in the
+// title or description as the second, retrospective signal; ordinary analytic
+// verbs and current-state language are deliberately insufficient.
 const HISTORICAL_ANNIVERSARY_HEADLINE_RE =
   /^(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:years?|decades?)|a\s+decade)\s+(?:on(?:\s+from)?|after|since)\b/i;
 const HISTORICAL_ANNIVERSARY_CONTEXT_RE =
-  /\b(?:legacy|lasting\s+(?:impact|effects?|consequences?)|long[-\s]?term\s+(?:impact|effects?|consequences?)|continues?\s+to\s+(?:shape|influence|define)|remains?\s+divided)\b/i;
+  /\b(?:legacy|(?:lasting|long[-\s]?term)\s+(?:impact|effects?|consequences?))\b/i;
 const HISTORICAL_EXPLAINER_TITLE_TIME_RE =
   /\b(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:years?|decades?)\s+(?:ago|after|later|on(?:\s+from)?|since)|anniversary|retrospective|(?:a|this)\s+look back)\b/i;
 const HISTORICAL_EXPLAINER_DESCRIPTION_LOOKBACK_RE = /\b(?:a|this)\s+look[-\s]?back\b/i;
