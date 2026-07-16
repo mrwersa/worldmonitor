@@ -134,6 +134,21 @@ function withBrowserDom(fn: () => void): void {
 }
 
 describe('dom-utils construction helpers', () => {
+  it('withBrowserDom exposes standard node-type contracts', () => {
+    withBrowserDom(() => {
+      const element = document.createElement('div');
+      const text = document.createTextNode('content');
+      const fragment = document.createDocumentFragment();
+
+      assert.equal(Node.ELEMENT_NODE, 1);
+      assert.equal(Node.TEXT_NODE, 3);
+      assert.equal(Node.DOCUMENT_FRAGMENT_NODE, 11);
+      assert.equal(element.nodeType, Node.ELEMENT_NODE);
+      assert.equal(text.nodeType, Node.TEXT_NODE);
+      assert.equal(fragment.nodeType, Node.DOCUMENT_FRAGMENT_NODE);
+    });
+  });
+
   it('h applies attributes, datasets, and both supported style forms', () => {
     withBrowserDom(() => {
       const element = h('button', {
