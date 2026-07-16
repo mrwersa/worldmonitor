@@ -58,6 +58,12 @@ jobs:
       # (warnDeliveryFailure 'missing_token'), never an error — so a missing secret can't
       # break the CORS deploy.
       - name: Set Axiom secret
+        # Must never gate the CORS deploy. A secret-put that fails (token lacks the
+        # Workers-secret scope, transient CF error) would otherwise fail the job and skip
+        # Deploy below — coupling the fragile CORS deploy to Axiom telemetry, the exact
+        # invariant this path promises not to break. On failure the shadow just no-ops
+        # (missing_token); the failure still surfaces in the job log.
+        continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
