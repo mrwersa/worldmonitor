@@ -88,6 +88,24 @@ function extensionFrame(filename = 'blob:https://example.com/ext-1234', fn = 'in
   return { filename, lineno: 1, function: fn };
 }
 
+// ─── ignoreErrors message matches ────────────────────────────────────────
+
+describe('ignoreErrors filters', () => {
+  it('suppresses Clerk SDK UI chunk load failure', () => {
+    assert.ok(
+      isIgnored('[clerk] failed to load https://clerk.worldmonitor.app/npm/@clerk/ui@1/dist/ui.browser.js'),
+      'Clerk SDK load-failure message must be ignored',
+    );
+  });
+
+  it('does NOT suppress a generic "failed to load" error from our code', () => {
+    assert.ok(
+      !isIgnored('Failed to load dashboard config'),
+      'Generic first-party load-failure messages must NOT be ignored',
+    );
+  });
+});
+
 // ─── P2: firstPartyFile regex covers all Vite chunk patterns ─────────────
 
 describe('first-party file detection', () => {
@@ -554,6 +572,18 @@ describe('existing beforeSend filters', () => {
       { filename: 'chrome-extension://bkkbcggnhapdmkeljlodobbkopceiche/injectScriptAdjust.js', lineno: 1, function: 'doDefault' },
     ]);
     assert.equal(beforeSend(event), null, 'Extension-wrapped window.fetch network blip should be suppressed');
+  });
+
+  it('suppresses bare "Failed to fetch" when extension frame function chains to window.fetch', () => {
+    // Real 2026-07-16 stack: extension `frame_ant/frame_ant.js` wraps fetch and the
+    // leaked rejection frame function is `r.class.c.value.window.fetch`. The original
+    // SG regex only matched `window.fetch` or `Object.apply`; broaden it to any chain
+    // ending in `.window.fetch` while still rejecting `prefetch`/`fetchContent`.
+    const event = makeEvent('Failed to fetch', 'TypeError', [
+      { filename: '/assets/main-B1YHLdCi.js', lineno: 401, function: 'h' },
+      { filename: 'chrome-extension://hoklmmgfnpapgjgcpechhaamimifchmp/frame_ant/frame_ant.js', lineno: 2, function: 'r.class.c.value.window.fetch' },
+    ]);
+    assert.equal(beforeSend(event), null, 'Extension chain-ending-in-window.fetch fetch failure should be suppressed');
   });
 
   it('does NOT suppress bare "Failed to fetch" with a first-party frame and a NON-fetch extension frame', () => {

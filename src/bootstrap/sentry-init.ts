@@ -320,6 +320,7 @@ function buildSentryInitOptions(): Parameters<SentryNs['init']>[0] {
       /Response cannot have a body with the given status/, // Safari: Response constructor with 204/304 + body
       /ClerkJS: Network error/, // Clerk SDK transient network failures on user devices
       /^ClerkJS: Response: needs_(?:first|second)_factor\b/, // Clerk SDK auth-flow branch not yet supported; SDK-internal limitation, not our code — WORLDMONITOR-Q1. Narrow to the observed `needs_*_factor` family so future actionable `ClerkJS: Response: <something>` errors (e.g. misconfigured redirect URI) still surface.
+      /\[clerk\] failed to load/, // Clerk SDK failed to load its own UI chunk from clerk.worldmonitor.app — SDK-internal load failure, not our code (WORLDMONITOR-??: Yandex Browser 26.4).
       /doesn't provide an export named/, // stale cached chunk after deploy references removed export
       /Possible side-effect in debug-evaluate/, // Chrome DevTools internal EvalError
       /ConvexError: CONFLICT/, // Expected OCC rejection on concurrent preference saves
@@ -544,7 +545,7 @@ function buildSentryInitOptions(): Parameters<SentryNs['init']>[0] {
       // `injected/hook.js` wraps `window.fetch` and the leaked rejection frame
       // surfaces as `Object.apply`, not `window.fetch`.
       if (/^(?:TypeError: )?Failed to fetch$/.test(msg)
-          && frames.some(f => /^(?:chrome|moz|safari(?:-web)?)-extension:\/\//.test(f.filename ?? '') && /^(?:(?:window|Object)\.)?(?:fetch|apply)$/i.test(f.function ?? ''))) {
+          && frames.some(f => /^(?:chrome|moz|safari(?:-web)?)-extension:\/\//.test(f.filename ?? '') && /^(?:(?:.*\.)?window\.|(?:window|Object)\.)?(?:fetch|apply)$/i.test(f.function ?? ''))) {
         return null;
       }
       // Bare `Failed to fetch` surfacing through the DebugBear RUM collector's
