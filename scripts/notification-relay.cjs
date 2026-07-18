@@ -10,6 +10,7 @@ const {
 const { callLLM } = require('./lib/llm-chain.cjs');
 const { fetchUserPreferences, extractUserContext, formatUserProfile } = require('./lib/user-context.cjs');
 const { countryNameToIso2 } = require('./shared/country-name-to-iso2.cjs');
+const ISO2_TO_REGION = require('./shared/iso2-to-region.json');
 const {
   buildDedupMaterial,
   classifySetNxResult,
@@ -688,13 +689,52 @@ function normalizeEventCountryCode(raw) {
   return countryNameToIso2(raw);
 }
 
-const UNATTRIBUTED_GLOBAL_EVENT_TYPES = new Set([
-  'corridor_risk',
-  'shipping_stress',
+// Event types that remain PERMISSIVE when they carry no country attribution.
+// Everything else without attribution is DROPPED for country-scoped rules
+// (#5359: a scoped user received aviation/market/conflict criticals because
+// the old default was permissive with a two-entry global denylist).
+//
+//  - rss_alert + the browser-submitted news origins (keyword_spike,
+//    hotspot_escalation, military_surge): RSS publishers still lack reliable
+//    country attribution; dropping them would silence keyword-relevant news
+//    for scoped users. Browser-submitted copies are additionally self-scoped
+//    via event.userId.
+//  - watchlist_story_alert: scoped by ticker (eventMatchesTickerScope), not
+//    by country — an explicit per-rule opt-in that country scope must not veto.
+const PERMISSIVE_UNATTRIBUTED_EVENT_TYPES = new Set([
+  'rss_alert',
+  'keyword_spike',
+  'hotspot_escalation',
+  'military_surge',
+  'watchlist_story_alert',
 ]);
 
-function isUnattributedGlobalEvent(event) {
-  return UNATTRIBUTED_GLOBAL_EVENT_TYPES.has(event?.eventType);
+function isPermissiveUnattributedEvent(event) {
+  return PERMISSIVE_UNATTRIBUTED_EVENT_TYPES.has(event?.eventType);
+}
+
+/**
+ * Regional-intelligence events (regional_regime_shift, regional_corridor_break,
+ * regional_trigger_activation, regional_buffer_failure) are region-scoped, not
+ * country-attributed. A country-scoped rule matches when ANY of its countries
+ * belongs to the event's region (shared/iso2-to-region.json, World Bank
+ * taxonomy). Missing/unknown region_id — including the 'global' region, which
+ * has no member countries — drops for scoped rules.
+ *
+ * PRECEDENCE (intentional): regional_* events are routed here BEFORE the
+ * countryCode/country extraction in eventMatchesCountryScope, so any
+ * payload.countryCode on a regional event is ignored. region_id is the sole
+ * scope identity for these events — a region-wide regime shift is not "about"
+ * one member country, and letting a stray countryCode narrow it would hide
+ * the event from the rest of the region's subscribers. Do not "fix" this by
+ * consulting countryCode first.
+ */
+function regionalEventMatchesCountryScope(event, rule) {
+  const regionId = event?.payload?.region_id;
+  if (typeof regionId !== 'string' || regionId.length === 0) return false;
+  return rule.countries.some(
+    (c) => ISO2_TO_REGION[String(c).toUpperCase()] === regionId,
+  );
 }
 
 /**
@@ -711,40 +751,39 @@ function isUnattributedGlobalEvent(event) {
 /**
  * Filter events by per-rule country-scope.
  *
- * When `rule.countries` is empty / absent, all events match (current behavior,
- * full backwards-compat for pre-migration rules).
+ * When `rule.countries` is empty / absent, all events match (full
+ * backwards-compat for pre-migration rules).
  *
  * When `rule.countries` is populated, the user explicitly opted into country-
- * scoped alerts. We try multiple payload shapes for the event's country
- * attribution because publishers are inconsistent: regional-snapshot uses
- * `payload.countryCode`, ais-relay sometimes uses `payload.country`, browser-
- * submitted rss_alert events occasionally lift `country` to the event root.
+ * scoped alerts — the UI copy says "Restrict alerts to specific countries".
+ * We try multiple payload shapes for the event's country attribution because
+ * publishers are inconsistent: seeders use `payload.countryCode`, ais-relay
+ * sometimes uses `payload.country`, browser-submitted rss_alert events
+ * occasionally lift `country` to the event root.
  *
- * Known-global semantics for unattributed events: when a rule has
- * countries=['US'] and a known global event has NO country attribution, do not
- * deliver it. A populated country scope means "only alerts matching my
- * selected countries"; delivering global Corridor Risk / Shipping Stress alerts
- * to a Ukraine/Romania-scoped user is worse than omitting those unscoped alerts.
+ * Default for UNATTRIBUTED events is DROP (#5359). The old default was
+ * permissive with a two-entry denylist (corridor_risk, shipping_stress), so
+ * every new or attribution-less event type — aviation_closure, market_alert,
+ * conflict_escalation with an unmapped country name — leaked to scoped users.
+ * Only the news-origin types in PERMISSIVE_UNATTRIBUTED_EVENT_TYPES stay
+ * permissive (RSS has no reliable attribution yet; scoped users should not
+ * lose keyword-relevant news), and watchlist_story_alert is scoped by ticker
+ * instead. Regional-intelligence events match via region membership.
  *
- * RATIONALE: the UI copy says "Restrict alerts to specific countries" and
- * users now rely on it to narrow noisy global feeds. RSS publishers still lack
- * reliable country attribution, so they stay permissive until attribution is
- * available; otherwise a scoped user would lose keyword-relevant news alerts.
- * Publishers that know a country must emit `payload.countryCode` or
- * `payload.country` to reach scoped rules reliably.
+ * Strict semantics when the event IS attributed but doesn't match:
+ * rule.countries=['US'] + event.payload.countryCode='IR' → drop.
  *
- * Strict semantics still apply when the event IS attributed but doesn't
- * match: rule.countries=['US'] + event.payload.countryCode='IR' → drop.
- *
- * Country values are normalized to uppercase ISO-3166 alpha-2 before
- * matching. Known malformed values emitted by current publishers (for
- * example 'USA', 'United States', 'UAE') are mapped to ISO2 and filtered
- * strictly. Unknown malformed values fall through to the "unattributed"
- * branch and are dropped only for known-global events.
+ * Country values are normalized to uppercase ISO-3166 alpha-2 via the full
+ * shared/country-names.json map before matching. Values the map cannot
+ * resolve fall through to the unattributed branch above.
  */
 function eventMatchesCountryScope(event, rule) {
   // Empty/absent countries on the rule → all events (no filter applied).
   if (!Array.isArray(rule.countries) || rule.countries.length === 0) return true;
+
+  if (typeof event?.eventType === 'string' && event.eventType.startsWith('regional_')) {
+    return regionalEventMatchesCountryScope(event, rule);
+  }
 
   const eventCountry =
     event?.payload?.countryCode
@@ -752,15 +791,14 @@ function eventMatchesCountryScope(event, rule) {
     ?? event?.country
     ?? null;
 
-  // Unattributed -> drop only known global/noisy events; keep RSS permissive
-  // until publishers provide reliable country attribution.
+  // Unattributed → drop unless the type is explicitly news-permissive.
   if (typeof eventCountry !== 'string' || eventCountry.trim().length === 0) {
-    return !isUnattributedGlobalEvent(event);
+    return isPermissiveUnattributedEvent(event);
   }
 
   const normalized = normalizeEventCountryCode(eventCountry);
-  // Unknown malformed value -> treat as unattributed.
-  if (normalized === null) return !isUnattributedGlobalEvent(event);
+  // Unresolvable country value → treat as unattributed.
+  if (normalized === null) return isPermissiveUnattributedEvent(event);
 
   return rule.countries.includes(normalized);
 }
@@ -1103,6 +1141,25 @@ async function processEvent(event) {
     (!event.userId || r.userId === event.userId)
   );
 
+  // Deploy observability for the #5359 default-DROP change: count rules that
+  // passed every OTHER gate but were excluded by country scope, so support can
+  // distinguish "working as intended" from "delivery bug" for scoped users.
+  // No userIds in the line — event identity + count is enough to correlate.
+  const countryScopeDrops = enabledRules.filter(r =>
+    (!r.digestMode || r.digestMode === 'realtime') &&
+    ruleMatchesEventType(r, event) &&
+    shouldNotify(r, event) &&
+    !eventMatchesCountryScope(event, r) &&
+    eventMatchesTickerScope(event, r) &&
+    (!event.variant || !r.variant || r.variant === event.variant) &&
+    (!event.userId || r.userId === event.userId)
+  ).length;
+  if (countryScopeDrops > 0) {
+    const rawAttribution = event?.payload?.countryCode ?? event?.payload?.country ?? event?.country ?? '(unattributed)';
+    const attribution = String(rawAttribution).replace(/[\r\n]/g, ' ').slice(0, 60);
+    console.log(`[relay] Country-scope drop: ${event.eventType} attribution=${attribution} excluded ${countryScopeDrops} scoped rule(s)`);
+  }
+
   if (matching.length === 0) return;
 
   // Batch PRO check: resolve all unique userIds in parallel instead of one-by-one.
@@ -1286,4 +1343,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { sendTelegram, checkDedup, upstashDedupSetNx };
+module.exports = { sendTelegram, checkDedup, upstashDedupSetNx, eventMatchesCountryScope };
