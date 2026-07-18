@@ -49,6 +49,7 @@ test('frontend session mint must not block API callers forever', async () => {
   ])));
 
   assert.equal(outcomes.filter((value) => value === 'still-pending').length, 0);
+  mod.__resetWmSessionForTests();
 });
 
 test('wm-session request-body read must terminate for a body that never ends', async () => {
@@ -126,4 +127,39 @@ test('widget-agent request-body read must terminate for a body that never ends',
     globalThis.fetch = originalFetch;
     delete process.env.WIDGET_AGENT_BODY_TIMEOUT_MS;
   }
+});
+
+test('__resetWmSessionForTests restores the default mint timeout', async () => {
+  (globalThis as unknown as { window: unknown }).window = globalThis;
+  (globalThis as unknown as { location: Location }).location = {
+    href: 'https://worldmonitor.app/',
+    origin: 'https://worldmonitor.app',
+    hostname: 'worldmonitor.app',
+    protocol: 'https:',
+    host: 'worldmonitor.app',
+  } as Location;
+  (globalThis as unknown as { sessionStorage: Storage }).sessionStorage = storage();
+  (globalThis as unknown as { localStorage: Storage }).localStorage = storage();
+  (globalThis as unknown as { document: unknown }).document = {
+    visibilityState: 'visible',
+    addEventListener() {},
+  };
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = ((_input, init) => new Promise<Response>((resolve, reject) => {
+    if (init?.signal?.aborted) {
+      reject(new Error('Aborted'));
+      return;
+    }
+    init?.signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+    setTimeout(() => resolve(new Response(JSON.stringify({ exp: Date.now() + 3600000 }))), 100);
+  })) as typeof fetch;
+
+  const mod = await import('../src/services/wm-session.ts?reset-timeout-repro=1');
+  mod.__setWmSessionFetchTimeoutForTests(50);
+  mod.__resetWmSessionForTests();
+
+  const outcome = await Promise.race([
+    mod.ensureWmSession().then(() => 'settled'),
+    after(500, 'still-pending'),
+  ]);
+  assert.equal(outcome, 'settled');
 });

@@ -102,9 +102,11 @@ test('validateSessionToken rejects exact-boundary and non-finite expirations', a
   const boundarySig = Buffer.from(new Uint8Array(boundarySigBuf)).toString('base64url');
   assert.equal(await validateSessionToken(`wms_${boundaryBody}.${boundarySig}`), false);
 
-  // JSON numeric overflow parses to Infinity; such a token must not be treated
-  // as never-expiring.
-  const infiniteBody = Buffer.from(JSON.stringify({ iat: now, exp: Infinity, n: 'infinite02' })).toString('base64url');
+  // A JSON number that overflows to Infinity must not be treated as never-expiring.
+  // JSON.stringify turns Infinity into null, so we build the literal JSON string
+  // with the unquoted numeric literal 1e309; JSON.parse yields Infinity for it and
+  // exercises the Number.isFinite guard.
+  const infiniteBody = Buffer.from(`{"iat":${now},"exp":1e309,"n":"infinite02"}`).toString('base64url');
   const infiniteSigBuf = await crypto.subtle.sign('HMAC', key, enc.encode(infiniteBody));
   const infiniteSig = Buffer.from(new Uint8Array(infiniteSigBuf)).toString('base64url');
   assert.equal(await validateSessionToken(`wms_${infiniteBody}.${infiniteSig}`), false);

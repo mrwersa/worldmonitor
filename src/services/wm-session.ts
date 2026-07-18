@@ -189,6 +189,7 @@ export function __resetWmSessionForTests(): void {
   interceptorInstalled = false;
   sessionDeadUntil = 0;
   sentryEnqueue = enqueueSentryCall;
+  fetchNewSessionTimeoutMs = 10_000;
 }
 
 // Test-only: shrink the mint timeout so adversarial repros for hung fetches
