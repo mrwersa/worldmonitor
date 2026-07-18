@@ -12451,6 +12451,23 @@ a.prediction-link:hover {
   vertical-align: middle;
 }
 
+/*
+ * "shown/total" for layers the globe's marker budget is trimming (#5368).
+ * Muted and right-aligned: it reports a limit, it is not a call to action.
+ */
+.layer-truncation-count {
+  margin-left: auto;
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  /* Theme token, not a hardcoded white: the layer panel is theme-aware and the
+     light theme's --bg is near-white, which would hide a white badge. */
+  color: var(--text-dim);
+  white-space: nowrap;
+  /* Reports a limit; it is not a control. */
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
 /* -- Locked panel: hide count badge + extra chrome -- */
 .panel-is-locked .panel-count,
 .panel-is-locked .panel-data-badge,
