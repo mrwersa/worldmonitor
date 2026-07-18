@@ -12463,8 +12463,10 @@ a.prediction-link:hover {
      light theme's --bg is near-white, which would hide a white badge. */
   color: var(--text-dim);
   white-space: nowrap;
-  /* Reports a limit; it is not a control. */
-  pointer-events: none;
+  /* Hoverable on purpose: the full disclosure lives in the element's `title`,
+     and `pointer-events: none` would suppress the tooltip. Safe to hover and
+     click because the badge is a SIBLING of the <label>, not inside it. */
+  cursor: help;
   flex-shrink: 0;
 }
 

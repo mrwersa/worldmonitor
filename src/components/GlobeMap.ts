@@ -567,6 +567,7 @@ export class GlobeMap {
   private markerTruncation: Record<string, GlobeLayerTruncation> = {};
   /** HTML markers handed to globe.gl on the last flush — the per-frame cost driver. */
   private renderedMarkerCount = 0;
+  private markerBudgetProfile: 'mobile' | 'desktop' = 'desktop';
   private webcamMarkerMode: string = (() => {
     try {
       return localStorage.getItem('wm-webcam-marker-mode') || 'icon';
@@ -713,6 +714,11 @@ export class GlobeMap {
     controls.enableDamping = !desktop;
 
     this.controlsEndHandler = () => {
+      // Truncated layers are ranked by nearness to the camera, so the visible
+      // subset is only correct for the POV it was computed at. Re-select when
+      // the camera settles — that is what makes "rotate or zoom to bring others
+      // in" true rather than a promise the badge cannot keep (#5368).
+      this.reselectMarkersForViewport();
       if (!this.layers.satellites) return;
       if (this.imageryFetchTimer) clearTimeout(this.imageryFetchTimer);
       this.imageryFetchTimer = setTimeout(() => this.fetchImageryForViewport(), 800);
@@ -2122,7 +2128,9 @@ export class GlobeMap {
     const add = (
       layer: string,
       markers: readonly GlobeMarker[],
-      extra: Partial<GlobeMarkerGroup<GlobeMarker>> = {},
+      // Only the tuning knobs — spreading a full Partial would let a caller
+      // silently overwrite the `layer`/`markers` this function just set.
+      extra: Pick<Partial<GlobeMarkerGroup<GlobeMarker>>, 'rank' | 'exempt'> = {},
     ): void => { if (markers.length) groups.push({ layer, markers, ...extra }); };
 
     if (this.layers.hotspots) add('hotspots', this.hotspots, { rank: m => (m._kind === 'hotspot' ? m.escalationScore : 0) });
@@ -2193,23 +2201,35 @@ export class GlobeMap {
       m => ({ lat: m._lat, lng: m._lng }),
     );
     for (const group of groups) {
-      if (!group.rank && !group.exempt) group.rank = nearestFirst;
+      if (group.exempt) continue;
+      // Unranked layers rank by nearness outright; ranked ones use it to break
+      // ties, because a coarse severity rank (carrier-or-not leaves ~1,500
+      // vessels on one score) would otherwise fall back to raw feed order.
+      if (group.rank) group.tieBreak = nearestFirst;
+      else group.rank = nearestFirst;
     }
 
     const budget = isMobileDevice() ? GLOBE_MARKER_BUDGET_MOBILE : GLOBE_MARKER_BUDGET_DESKTOP;
     const { markers, truncated } = selectGlobeMarkers(groups, budget);
+    try {
+      this.globe.htmlElementsData(markers);
+    } catch (err) {
+      // The globe kept its previous markers, so leave the badges and the probe
+      // describing what is actually on screen rather than what we intended.
+      if (import.meta.env.DEV) console.warn('[GlobeMap] flush error', err);
+      return;
+    }
+
     this.markerTruncation = truncated;
     this.renderedMarkerCount = markers.length;
+    this.markerBudgetProfile = budget === GLOBE_MARKER_BUDGET_MOBILE ? 'mobile' : 'desktop';
     this.updateLayerTruncationLabels();
     setGlobeMarkerLoad({
       rendered: markers.length,
       truncated,
       activeLayerCount: Object.values(this.layers).filter(Boolean).length,
+      budgetProfile: this.markerBudgetProfile,
     });
-
-    try {
-      this.globe.htmlElementsData(markers);
-    } catch (err) { if (import.meta.env.DEV) console.warn('[GlobeMap] flush error', err); }
   }
 
   private flushArcs(): void {
@@ -2828,6 +2848,19 @@ export class GlobeMap {
     }
   }
 
+  /**
+   * Re-run marker selection after the camera settles, so proximity-ranked
+   * layers follow the view (#5368).
+   *
+   * Only when something is actually being withheld: with nothing truncated the
+   * selection is view-independent and a re-flush would churn DOM for no visible
+   * change, on the very path this feature exists to make cheaper.
+   */
+  private reselectMarkersForViewport(): void {
+    if (!Object.keys(this.markerTruncation).length) return;
+    this.flushMarkers();
+  }
+
   /** Markers currently handed to globe.gl, and what the budget withheld (#5368). */
   public getMarkerBudgetState(): { rendered: number; truncated: Record<string, GlobeLayerTruncation> } {
     return { rendered: this.renderedMarkerCount, truncated: this.markerTruncation };
@@ -2876,6 +2909,9 @@ export class GlobeMap {
       else                altitude = 1.5;
     }
     this.globe.pointOfView({ lat: preset.lat, lng: preset.lng, altitude }, SET_CENTER_ROTATION_MS);
+    // Programmatic moves emit no controls 'end' event, so re-select once the
+    // transition has landed on the new POV.
+    setTimeout(() => this.reselectMarkersForViewport(), SET_CENTER_ROTATION_MS + 50);
   }
 
   public setCenter(lat: number, lon: number, zoom?: number): void {
@@ -2894,6 +2930,7 @@ export class GlobeMap {
       else                altitude = 1.5;
     }
     this.globe.pointOfView({ lat, lng: lon, altitude }, SET_CENTER_ROTATION_MS);
+    setTimeout(() => this.reselectMarkersForViewport(), SET_CENTER_ROTATION_MS + 50);
   }
 
   public getCenter(): { lat: number; lon: number } | null {

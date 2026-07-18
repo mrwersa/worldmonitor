@@ -36,6 +36,16 @@ export interface GlobeMarkerGroup<T> {
    */
   rank?: (marker: T) => number;
   /**
+   * Breaks ties within an equal `rank`, before source order does.
+   *
+   * A severity rank is usually coarse — `carrier ? 1 : 0` leaves ~1,500 vessels
+   * on the same score — and without a tie-break the cut among them falls back to
+   * feed order, which is the arbitrary-selection problem `proximityRank` exists
+   * to avoid. Pass `proximityRank` here so severity decides first and nearness
+   * decides the rest. Compared lexicographically, so no weighting to tune.
+   */
+  tieBreak?: (marker: T) => number;
+  /**
    * Ephemeral or navigational markers that must always render (e.g. the
    * flash-to-location pin). Exempt groups bypass the budget entirely; keep them
    * to a handful of markers.
@@ -124,22 +134,31 @@ export function proximityRank<T>(focus: LatLng, position: (marker: T) => LatLng)
   };
 }
 
-/** Top `cap` markers by rank, preserving the group's original relative order. */
-function takeTop<T>(markers: readonly T[], cap: number, rank?: (marker: T) => number): T[] {
+/** Top `cap` markers by rank then tie-break, preserving the group's own order. */
+function takeTop<T>(
+  markers: readonly T[],
+  cap: number,
+  rank?: (marker: T) => number,
+  tieBreak?: (marker: T) => number,
+): T[] {
   if (markers.length <= cap) return markers.slice();
   // No rank means the caller has no opinion, so the cut falls wherever the feed
   // happened to order things. Callers rendering anything a user might depend on
   // should pass a rank (severity, or `proximityRank`) rather than accept this.
   if (!rank) return markers.slice(0, cap);
-  // Rank descending, original index ascending, so equal-rank markers stay stable.
   // A non-finite score sorts last rather than poisoning the comparator with NaN.
-  const score = (marker: T): number => {
-    const value = rank(marker);
-    return Number.isFinite(value) ? value : -Infinity;
-  };
+  const finite = (value: number): number => (Number.isFinite(value) ? value : -Infinity);
+  // Rank desc, then tie-break desc, then original index asc — compared in order
+  // rather than summed, so a coarse rank never has to be weighted against a fine
+  // tie-break (magnitude 5.1 vs 5.2 stays decisive; equal scores fall to nearness).
   const keep = markers
-    .map((marker, index) => ({ marker, index, score: score(marker) }))
-    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .map((marker, index) => ({
+      marker,
+      index,
+      score: finite(rank(marker)),
+      tie: tieBreak ? finite(tieBreak(marker)) : 0,
+    }))
+    .sort((a, b) => (b.score - a.score) || (b.tie - a.tie) || (a.index - b.index))
     .slice(0, cap)
     .sort((a, b) => a.index - b.index);
   return keep.map(entry => entry.marker);
@@ -168,7 +187,7 @@ export function selectGlobeMarkers<T>(
   const perLayer = new Map<string, GlobeLayerTruncation>();
 
   for (const group of budgeted) {
-    const kept = takeTop(group.markers, cap, group.rank);
+    const kept = takeTop(group.markers, cap, group.rank, group.tieBreak);
     const running = perLayer.get(group.layer) ?? { shown: 0, total: 0 };
     running.shown += kept.length;
     running.total += group.markers.length;

@@ -301,3 +301,44 @@ describe('selectGlobeMarkers — multi-feed layers and bad ranks', () => {
     assert.deepEqual(allExempt.truncated, {});
   });
 });
+
+describe('selectGlobeMarkers — tie-break (#5368)', () => {
+  // A carrier-or-not rank leaves ~1,500 vessels on one score. Without a
+  // tie-break the cut among them falls to feed order — the same arbitrary
+  // selection proximity ranking exists to prevent.
+  const vessels = [
+    { id: 'tug-far', carrier: 0, near: -0.9 },
+    { id: 'tug-near', carrier: 0, near: 0.9 },
+    { id: 'carrier-far', carrier: 1, near: -0.8 },
+    { id: 'frigate-mid', carrier: 0, near: 0.1 },
+  ];
+
+  it('lets severity decide first and nearness decide the rest', () => {
+    const { markers } = selectGlobeMarkers(
+      [{ layer: 'military', markers: vessels, rank: v => v.carrier, tieBreak: v => v.near }],
+      { perLayer: 2, total: 2 },
+    );
+    assert.deepEqual(
+      markers.map(m => m.id).sort(),
+      ['carrier-far', 'tug-near'],
+      'the carrier survives on severity; the remaining slot goes to the nearest, not the first',
+    );
+  });
+
+  it('does not let the tie-break override a real rank difference', () => {
+    const { markers } = selectGlobeMarkers(
+      [{ layer: 'q', markers: [{ id: 'm5.2-far', mag: 5.2, near: -1 }, { id: 'm5.1-near', mag: 5.1, near: 1 }],
+         rank: q => q.mag, tieBreak: q => q.near }],
+      { perLayer: 1, total: 1 },
+    );
+    assert.deepEqual(markers.map(m => m.id), ['m5.2-far'], 'a 0.1 magnitude gap still outranks nearness');
+  });
+
+  it('falls back to source order when no tie-break is supplied', () => {
+    const { markers } = selectGlobeMarkers(
+      [{ layer: 'military', markers: vessels, rank: v => v.carrier }],
+      { perLayer: 2, total: 2 },
+    );
+    assert.deepEqual(markers.map(m => m.id).sort(), ['carrier-far', 'tug-far']);
+  });
+});

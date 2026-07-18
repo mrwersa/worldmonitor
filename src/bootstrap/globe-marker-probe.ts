@@ -26,6 +26,15 @@ export interface GlobeMarkerLoad {
   truncated: Record<string, { shown: number; total: number }>;
   /** How many layers are switched on. */
   activeLayerCount: number;
+  /**
+   * Which budget the globe applied. Reported explicitly because it does NOT
+   * track the INP event's own `formFactor`: the budget splits at the app's
+   * 768px layout breakpoint, while `getWebVitalsFormFactor` calls anything
+   * coarse-pointer or <=1024px "mobile". A 900px tablet is therefore a mobile
+   * form factor running the desktop budget, and a join that assumed otherwise
+   * would mis-attribute it.
+   */
+  budgetProfile: 'mobile' | 'desktop';
 }
 
 let current: GlobeMarkerLoad | null = null;
@@ -67,6 +76,7 @@ export function getGlobeMarkerExtra(
     globeMarkerBucket: bucketMarkerCount(load.rendered),
     globeActiveLayerCount: load.activeLayerCount,
     globeTruncated: truncated,
+    globeBudgetProfile: load.budgetProfile,
   };
 }
 
