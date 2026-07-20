@@ -78,14 +78,22 @@ function extractOrgId(payload: Record<string, unknown>): string | null {
 const _planCache = new Map<string, { role: 'free' | 'pro'; expiresAt: number }>();
 const PLAN_CACHE_TTL_MS = 5 * 60 * 1_000;
 
+// Matches the 3s budget used for the other external auth lookup
+// (server/_shared/user-api-key.ts, api/_user-api-key.js VALIDATION_TIMEOUT_MS).
+const PLAN_LOOKUP_TIMEOUT_MS = Number(process.env.CLERK_PLAN_LOOKUP_TIMEOUT_MS) || 3_000;
+
 async function lookupPlanFromClerk(userId: string): Promise<'free' | 'pro'> {
   const cached = _planCache.get(userId);
   if (cached && Date.now() < cached.expiresAt) return cached.role;
 
   if (!CLERK_SECRET_KEY) return 'free';
   try {
+    // Adversarial DoS guard: validateBearerToken awaits this on every standard
+    // (non-template) session token, so a Clerk API stall would otherwise let an
+    // authenticated caller pin gateway invocations open indefinitely.
     const resp = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
       headers: { Authorization: `Bearer ${CLERK_SECRET_KEY}` },
+      signal: AbortSignal.timeout(PLAN_LOOKUP_TIMEOUT_MS),
     });
     if (!resp.ok) return 'free';
     const user = (await resp.json()) as { public_metadata?: Record<string, unknown> };
