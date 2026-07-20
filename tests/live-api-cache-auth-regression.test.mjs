@@ -209,11 +209,24 @@ describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - 
       assert.equal(readBody.error, undefined,
         `anonymous resources/read ${resource.uri} must not error: ${JSON.stringify(readBody.error)}`);
       const content = readBody.result?.contents?.[0];
-      assert.equal(content?.mimeType, 'application/json',
+      // `ui://` entries are MCP-Apps app shells, not metadata: production
+      // declares them `text/html;profile=mcp-app` (api/mcp/ui/shell.ts
+      // UI_RESOURCE_MIME_TYPE). Same rule as the in-process sibling check in
+      // tests/mcp-resources.test.mjs. Still an exact-match assertion per URI
+      // scheme — a resource declaring the WRONG one of the two still fails.
+      const isUiShell = resource.uri.startsWith('ui://');
+      const expectedMime = isUiShell ? 'text/html;profile=mcp-app' : 'application/json';
+      assert.equal(content?.mimeType, expectedMime,
         `resources/read ${resource.uri} must declare a valid mimeType`);
       assert.ok(typeof content?.text === 'string' && content.text.length > 0,
         `resources/read ${resource.uri} must return non-empty content`);
-      JSON.parse(content.text); // valid JSON for the declared mimeType
+      // Content must actually parse as what it declares.
+      if (isUiShell) {
+        assert.match(content.text, /^\s*<!doctype html/i,
+          `resources/read ${resource.uri} declares HTML but did not return an HTML document`);
+      } else {
+        JSON.parse(content.text); // valid JSON for the declared mimeType
+      }
     }
 
     // A DATA/quota method stays gated: unauthenticated `tools/call` must be a
