@@ -22,7 +22,7 @@ vi.mock("../_shared/redis", () => ({
   setCachedJson: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { getCachedJson } from "../_shared/redis";
+import { getCachedJson, setCachedJson } from "../_shared/redis";
 import {
   getRequiredTier,
   checkEntitlement,
@@ -258,6 +258,42 @@ describe("gateway entitlement check", () => {
       } else {
         process.env.CONVEX_SERVER_SHARED_SECRET = originalSecret;
       }
+      vi.unstubAllGlobals();
+    }
+  });
+
+  test("confirmed Convex entitlement survives a Redis cache-write failure", async () => {
+    vi.mocked(getCachedJson).mockResolvedValueOnce(null);
+    vi.mocked(setCachedJson).mockRejectedValueOnce(new Error("upstash unavailable"));
+
+    const originalSiteUrl = process.env.CONVEX_SITE_URL;
+    const originalSecret = process.env.CONVEX_SERVER_SHARED_SECRET;
+    const confirmed = makeEntitlements(2, "api_starter");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(confirmed), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    process.env.CONVEX_SITE_URL = "https://example-deployment.convex.site";
+    process.env.CONVEX_SERVER_SHARED_SECRET = "test-secret";
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const result = await getEntitlements("user_cache_write_failure");
+      expect(result).toEqual(confirmed);
+      expect(setCachedJson).toHaveBeenCalledWith(
+        "entitlements:test:user_cache_write_failure",
+        confirmed,
+        900,
+        true,
+      );
+    } finally {
+      if (originalSiteUrl === undefined) delete process.env.CONVEX_SITE_URL;
+      else process.env.CONVEX_SITE_URL = originalSiteUrl;
+      if (originalSecret === undefined) delete process.env.CONVEX_SERVER_SHARED_SECRET;
+      else process.env.CONVEX_SERVER_SHARED_SECRET = originalSecret;
       vi.unstubAllGlobals();
     }
   });

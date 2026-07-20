@@ -64,6 +64,18 @@ function cfCacheStatus(resp) {
   return resp.headers.get('cf-cache-status') || '';
 }
 
+function vercelCacheStatus(resp) {
+  return resp.headers.get('x-vercel-cache') || '';
+}
+
+function isSharedCacheHit(resp) {
+  return cfCacheStatus(resp).toUpperCase() === 'HIT' || vercelCacheStatus(resp).toUpperCase() === 'HIT';
+}
+
+function markProbeCompleted(name) {
+  console.info(`LIVE_SWEEP_PROBE_COMPLETED ${name}`);
+}
+
 function assertNoStore(resp, name) {
   assert.match(cacheControl(resp), /\bno-store\b/i, `${name}: Cache-Control must include no-store`);
   const cdnCacheControl = resp.headers.get('cdn-cache-control') || '';
@@ -101,6 +113,18 @@ async function fetchText(pathOrUrl, init = {}) {
   return { resp, bodyText };
 }
 
+async function waitForSharedCacheHit(url, name) {
+  const attempts = [];
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const result = await fetchText(url);
+    assertPublicCacheable(result.resp, name);
+    attempts.push(`cf=${cfCacheStatus(result.resp) || '-'},vercel=${vercelCacheStatus(result.resp) || '-'}`);
+    if (isSharedCacheHit(result.resp)) return result;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.fail(`${name}: URL never became a confirmed shared-cache HIT (${attempts.join('; ')})`);
+}
+
 describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - set LIVE_API_CACHE_TESTS=1'})`, { skip: !LIVE }, () => {
   it('documents the Cloudflare rule assumptions being validated', () => {
     console.info([
@@ -125,6 +149,7 @@ describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - 
     const anon = await fetchText(`${API_BASE}/api/bootstrap?keys=weatherAlerts`);
     assertPublicCacheable(anon.resp, 'bootstrap anonymous weather');
     assert.match(anon.bodyText, /"data"\s*:/, 'bootstrap anonymous weather: expected data envelope');
+    markProbeCompleted('bootstrap-auth');
   });
 
   it('PINNED: an invalid key on a publicly-cached URL is served the cached anonymous 200, not a 401', async () => {
@@ -147,13 +172,14 @@ describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - 
     // header — that is an improvement; update this test deliberately.
     // Tracked separately for a product decision; not fixed here.
     const warm = `${API_BASE}/api/bootstrap?keys=weatherAlerts`;
-    await fetchText(warm); // ensure the anonymous response is cached
+    await waitForSharedCacheHit(warm, 'bootstrap anonymous warm-up');
     const withBadKey = await fetchText(warm, {
       headers: { 'X-WorldMonitor-Key': FAKE_WM_KEY },
     });
 
     if (withBadKey.resp.status === 401) {
       assertNoStore(withBadKey.resp, 'invalid key on warm URL (now failing closed)');
+      markProbeCompleted('warm-cache');
       return; // cache key now includes the auth header — strictly better.
     }
 
@@ -182,6 +208,7 @@ describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - 
       'invalid-key response must carry ONLY the public key that was requested — any additional ' +
         'key would mean an entitled payload is sitting in a public cache entry (#4497)',
     );
+    markProbeCompleted('warm-cache');
   });
 
   it('generated RPCs reject fake auth as dynamic no-store while public no-auth RPCs stay cacheable', async () => {
@@ -196,6 +223,7 @@ describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - 
     const publicRpc = await fetchText(`${API_BASE}/api/conflict/v1/list-acled-events`);
     assertPublicCacheable(publicRpc.resp, 'public no-auth RPC');
     assert.match(publicRpc.bodyText, /"events"\s*:/, 'public no-auth RPC: expected events payload');
+    markProbeCompleted('generated-rpc');
   });
 
   it('premium RPC fake auth fails closed without shared cache headers', async () => {
@@ -206,6 +234,7 @@ describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - 
     assertNoStore(fake.resp, 'premium RPC fake auth');
     assertNotCached200(fake.resp, 'premium RPC fake auth');
     assertNoSentinelLeak(fake.bodyText, 'premium RPC fake auth');
+    markProbeCompleted('premium-rpc');
   });
 
   it('MCP OPTIONS, public discovery, and gated data method are protocol-valid no-store responses', async () => {
@@ -334,6 +363,7 @@ describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - 
 
     const body = JSON.parse(post.bodyText);
     assert.equal(body.error?.code, -32001);
+    markProbeCompleted('mcp-protocol');
   });
 
   it('OAuth metadata remains discoverable and cacheable', async () => {
@@ -348,6 +378,7 @@ describe(`live API cache/auth regression sweep (${LIVE ? 'ENABLED' : 'SKIPPED - 
     const authBody = JSON.parse(authServer.bodyText);
     assert.equal(authBody.issuer, API_BASE);
     assert.equal(authBody.token_endpoint, `${API_BASE}/oauth/token`);
+    markProbeCompleted('oauth-metadata');
   });
 
   // The #4497 incident class is a CACHED 200 of private/authenticated data — the

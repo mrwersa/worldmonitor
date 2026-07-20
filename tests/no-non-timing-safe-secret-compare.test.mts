@@ -107,7 +107,7 @@ function buildSecretComparePattern(fragments: readonly string[] = SECRET_VARS): 
   const envEither = `(?:${anyIdent}${op}${envSecret}|${envSecret}${op}${anyIdent})`;
   // Inline secret-named header read vs anything, either order.
   const getForward = `${secretGet}${op}(?:${anyIdent}|process\\.env\\.|expected\\b|EXPECTED\\b)`;
-  const getReverse = `(?:${anyIdent}|${env}|expected\\b|EXPECTED\\b)${op}[A-Za-z0-9_$]+${secretGet}`;
+  const getReverse = `(?:${anyIdent}|${env}|expected\\b|EXPECTED\\b)${op}${anyIdent}${secretGet}`;
   return new RegExp(`(?:${forward}|${reverse}|${envEither}|${getForward}|${getReverse})`, 'i');
 }
 
@@ -216,6 +216,8 @@ const PATTERN_CASES: ReadonlyArray<{ src: string; match: boolean; why: string }>
   // header compare — a guard blind to this shape misses the likeliest recurrence.
   { src: "if (req.headers.get('x-probe-secret') !== expected) return", match: true, why: 'inline secret-named header read vs expected' },
   { src: "if (request.headers.get('x-relay-token') === process.env.FOO) return", match: true, why: 'inline secret-named header read vs env' },
+  { src: "if (expected === req.headers.get('x-probe-secret')) return", match: true, why: 'inline chained header read, reversed' },
+  { src: "if (process.env.FOO === request.headers.get('x-relay-token')) return", match: true, why: 'inline chained header read vs env, reversed' },
   // ---- MUST NOT MATCH: a NON-secret-named env var vs a neutral local must not
   // be swept up by the new env arm — that would flag ordinary config checks.
   { src: 'if (mode !== process.env.NODE_ENV) return', match: false, why: 'env var name is not secret-bearing' },

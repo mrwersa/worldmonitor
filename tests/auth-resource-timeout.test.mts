@@ -8,6 +8,16 @@ const after = <T>(ms: number, value: T): Promise<T> => new Promise((resolve) => 
 // The Clerk plan-lookup test needs a working fetch for its local JWKS server.
 const realFetch = globalThis.fetch;
 
+test('Clerk plan timeout env accepts only AbortSignal-safe positive integers', async () => {
+  const { parsePlanLookupTimeoutMs } = await import('../server/auth-session.ts?plan-timeout-env-parse=1');
+
+  assert.equal(parsePlanLookupTimeoutMs(undefined), 3_000);
+  assert.equal(parsePlanLookupTimeoutMs('50'), 50);
+  for (const value of ['0', '-1', '0.5', '1.5', 'Infinity', '4294967295', 'not-a-number']) {
+    assert.equal(parsePlanLookupTimeoutMs(value), 3_000, `${value} must fall back to the safe default`);
+  }
+});
+
 function storage(): Storage {
   const values = new Map<string, string>();
   return {

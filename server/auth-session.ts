@@ -81,7 +81,17 @@ const PLAN_CACHE_TTL_MS = 5 * 60 * 1_000;
 // Matches the 3s budget used for the other external auth lookup
 // — an inline AbortSignal.timeout(3_000) in server/_shared/user-api-key.ts, and
 // the VALIDATION_TIMEOUT_MS constant in api/_user-api-key.js.
-const PLAN_LOOKUP_TIMEOUT_MS = Number(process.env.CLERK_PLAN_LOOKUP_TIMEOUT_MS) || 3_000;
+const DEFAULT_PLAN_LOOKUP_TIMEOUT_MS = 3_000;
+const MAX_ABORT_SIGNAL_TIMEOUT_MS = 2_147_483_647;
+
+export function parsePlanLookupTimeoutMs(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= MAX_ABORT_SIGNAL_TIMEOUT_MS
+    ? parsed
+    : DEFAULT_PLAN_LOOKUP_TIMEOUT_MS;
+}
+
+const PLAN_LOOKUP_TIMEOUT_MS = parsePlanLookupTimeoutMs(process.env.CLERK_PLAN_LOOKUP_TIMEOUT_MS);
 
 async function lookupPlanFromClerk(userId: string): Promise<'free' | 'pro'> {
   const cached = _planCache.get(userId);

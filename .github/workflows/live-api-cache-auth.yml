@@ -90,7 +90,15 @@ jobs:
         # suite's own `assert.equal(LIVE, true)` self-check cannot help — it is
         # INSIDE the skipped describe.
         #
-        # So assert that work actually happened. `--test-reporter=tap` is pinned
+        # So assert that all mandatory work actually happened. The suite has one
+        # self-check plus six mandatory production-probe groups; the authenticated
+        # canary is a seventh probe group but remains an explicit skip until
+        # WM_LIVE_TEST_KEY is provisioned. Requiring seven passes means the
+        # documentation-only self-check cannot keep this workflow green if any
+        # mandatory production group stops registering or starts skipping. Each
+        # group also emits a named completion marker so an unrelated new test or
+        # the optional canary cannot compensate for a missing mandatory probe.
+        # `--test-reporter=tap` is pinned
         # explicitly rather than relying on the default, because Node picks the
         # reporter from TTY-ness and a format change would silently break the
         # grep — turning this guard itself into the vacuous-pass it prevents.
@@ -98,7 +106,14 @@ jobs:
         run: |
           set -o pipefail
           node --test --test-reporter=tap tests/live-api-cache-auth-regression.test.mjs 2>&1 | tee /tmp/sweep.log
-          if ! grep -qE '^# pass [1-9]' /tmp/sweep.log; then
-            echo "::error::Live sweep executed 0 assertions — the LIVE_API_CACHE_TESTS gate did not engage. The suite is inert, not passing."
+          pass_count=$(awk '/^# pass [0-9]+$/ { value = $3 } END { print value + 0 }' /tmp/sweep.log)
+          if [ "$pass_count" -lt 7 ]; then
+            echo "::error::Live sweep completed only $pass_count/7 mandatory checks — one or more production probe groups did not run."
             exit 1
           fi
+          for probe in bootstrap-auth warm-cache generated-rpc premium-rpc mcp-protocol oauth-metadata; do
+            if ! grep -qE "^[[:space:]]*# LIVE_SWEEP_PROBE_COMPLETED ${probe}$" /tmp/sweep.log; then
+              echo "::error::Live sweep did not complete mandatory production probe group: ${probe}"
+              exit 1
+            fi
+          done
