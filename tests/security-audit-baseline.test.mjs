@@ -112,14 +112,35 @@ describe('security audit baseline', () => {
   });
 
   it('flags baseline entries that no longer match any current advisory', () => {
-    const report = auditReportWith({
-      name: '@clerk/clerk-js',
-      severity: 'high',
-      title: 'known clerk advisory',
-      url: 'https://github.com/advisories/GHSA-w24r-5266-9c3c',
-    });
+    // Report carries the two pro-test advisories that ARE present in the current
+    // audit (the clerk advisory + shell-quote); only GHSA-qjx8, which no longer
+    // matches anything, must be flagged stale.
+    const report = {
+      vulnerabilities: {
+        '@clerk/clerk-js': {
+          name: '@clerk/clerk-js',
+          severity: 'high',
+          via: [{
+            name: '@clerk/clerk-js',
+            severity: 'high',
+            title: 'known clerk advisory',
+            url: 'https://github.com/advisories/GHSA-w24r-5266-9c3c',
+          }],
+        },
+        'shell-quote': {
+          name: 'shell-quote',
+          severity: 'high',
+          via: [{
+            name: 'shell-quote',
+            severity: 'high',
+            title: 'shell-quote DoS',
+            url: 'https://github.com/advisories/GHSA-395f-4hp3-45gv',
+          }],
+        },
+      },
+    };
 
-    // The still-present id is not reported as stale.
+    // The still-present ids are not reported as stale; GHSA-qjx8 (absent) is.
     assert.deepEqual(collectStaleBaselineEntries(report, 'pro-test/package-lock.json'), ['GHSA-qjx8-664m-686j']);
     // The empty root baseline has nothing to mark stale.
     assert.deepEqual(collectStaleBaselineEntries(report, 'package-lock.json'), []);
