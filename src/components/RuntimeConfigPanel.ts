@@ -18,11 +18,15 @@ import {
 import { invokeTauri } from '@/services/tauri-bridge';
 import { escapeHtml } from '@/utils/sanitize';
 import { isDesktopRuntime } from '@/services/runtime';
+import { isSelfHost } from '@/services/self-host';
 import { fetchOllamaModels as fetchOllamaModelsFromService } from '@/services/ollama-models';
 import { t } from '@/services/i18n';
 import { trackFeatureToggle } from '@/services/analytics';
 import { SIGNUP_URLS, PLAINTEXT_KEYS, MASKED_SENTINEL } from '@/services/settings-constants';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+
+const canEditSecrets = isDesktopRuntime() || isSelfHost;
+const canEditInputs = canEditSecrets;
 
 
 interface RuntimeConfigPanelOptions {
@@ -326,10 +330,10 @@ export class RuntimeConfigPanel extends Panel {
           <span class="runtime-secret-status ${statusClass}">${escapeHtml(status)}</span>
           <span class="runtime-secret-check ${checkClass}">&#x2713;</span>
           ${helpText ? `<div class="runtime-secret-meta">${escapeHtml(helpText)}</div>` : ''}
-          <select data-model-select class="${inputClass}" ${isDesktopRuntime() ? '' : 'disabled'}>
+          <select data-model-select class="${inputClass}" ${canEditInputs ? '' : 'disabled'}>
             ${storedModel ? `<option value="${escapeHtml(storedModel)}" selected>${escapeHtml(storedModel)}</option>` : '<option value="" selected disabled>Loading models...</option>'}
           </select>
-          <input type="text" data-model-manual class="${inputClass} hidden-input" placeholder="Or type model name" autocomplete="off" ${isDesktopRuntime() ? '' : 'disabled'} ${storedModel ? `value="${escapeHtml(storedModel)}"` : ''}>
+          <input type="text" data-model-manual class="${inputClass} hidden-input" placeholder="Or type model name" autocomplete="off" ${canEditInputs ? '' : 'disabled'} ${storedModel ? `value="${escapeHtml(storedModel)}"` : ''}>
           ${hintText ? `<span class="runtime-secret-hint">${escapeHtml(hintText)}</span>` : ''}
         </div>
       `;
@@ -346,7 +350,7 @@ export class RuntimeConfigPanel extends Panel {
         <span class="runtime-secret-check ${checkClass}">&#x2713;</span>
         ${helpText ? `<div class="runtime-secret-meta">${escapeHtml(helpText)}</div>` : ''}
         <div class="runtime-input-wrapper${showGetKey ? ' has-suffix' : ''}">
-          <input type="${PLAINTEXT_KEYS.has(key) ? 'text' : 'password'}" data-secret="${key}" placeholder="${pending ? t('modals.runtimeConfig.placeholder.staged') : t('modals.runtimeConfig.placeholder.setSecret')}" autocomplete="off" ${isDesktopRuntime() ? '' : 'disabled'} class="${inputClass}" ${pending ? `value="${PLAINTEXT_KEYS.has(key) ? escapeHtml(this.pendingSecrets.get(key) || '') : MASKED_SENTINEL}"` : (PLAINTEXT_KEYS.has(key) && state.present ? `value="${escapeHtml(getRuntimeConfigSnapshot().secrets[key]?.value || '')}"` : '')}>
+          <input type="${PLAINTEXT_KEYS.has(key) ? 'text' : 'password'}" data-secret="${key}" placeholder="${pending ? t('modals.runtimeConfig.placeholder.staged') : t('modals.runtimeConfig.placeholder.setSecret')}" autocomplete="off" ${canEditInputs ? '' : 'disabled'} class="${inputClass}" ${pending ? `value="${PLAINTEXT_KEYS.has(key) ? escapeHtml(this.pendingSecrets.get(key) || '') : MASKED_SENTINEL}"` : (PLAINTEXT_KEYS.has(key) && state.present ? `value="${escapeHtml(getRuntimeConfigSnapshot().secrets[key]?.value || '')}"` : '')}>
           ${getKeyHtml}
         </div>
         ${hintText ? `<span class="runtime-secret-hint">${escapeHtml(hintText)}</span>` : ''}
@@ -368,7 +372,7 @@ export class RuntimeConfigPanel extends Panel {
       });
     });
 
-    if (!isDesktopRuntime()) return;
+    if (!canEditSecrets) return;
 
     if (this.mode === 'alert') {
       this.content.querySelector<HTMLButtonElement>('[data-early-access]')?.addEventListener('click', () => {

@@ -70,6 +70,7 @@ import type { SupplyChainPanel } from '@/components/SupplyChainPanel';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 import { loadPanelCollapsed, loadPanelColSpans, loadPanelSpans } from '@/utils/panel-storage';
 import { measure, mutate } from '@/utils/layout-batch';
+import { isSelfHost } from '@/services/self-host';
 
 function readSessionStorageValue(key: string): string | null {
   try {
@@ -2132,7 +2133,7 @@ export class PanelLayoutManager implements AppModule {
     this.lazyDefaultPanel('etf-flows', () => import('@/components/ETFFlowsPanel'), 'ETFFlowsPanel');
     this.lazyDefaultPanel('stablecoins', () => import('@/components/StablecoinPanel'), 'StablecoinPanel');
 
-    if (this.ctx.isDesktopApp) {
+    if (this.ctx.isDesktopApp || isSelfHost) {
       this.lazyImportedPanel('runtime-config', () => import('@/components/RuntimeConfigPanel'), 'RuntimeConfigPanel', (RuntimeConfigPanel) => new RuntimeConfigPanel({ mode: 'alert' }));
     }
 

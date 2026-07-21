@@ -34,6 +34,10 @@ import {
   type ApiPlanLimitNotice,
 } from '@/services/api-plan-limit-notices';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
+import { isSelfHost } from '@/services/self-host';
+import { getSecretState, type RuntimeSecretKey } from '@/services/runtime-config';
+import { RUNTIME_FEATURES, getEffectiveSecrets } from '@/services/runtime-config';
+import { SETTINGS_CATEGORIES, HUMAN_LABELS, SIGNUP_URLS, PLAINTEXT_KEYS } from '@/services/settings-constants';
 
 
 function showToast(msg: string): void {
@@ -557,6 +561,9 @@ export class UnifiedSettings {
     this.updateSourcesCounter();
 
     this.attachApiKeysHandlers();
+    if (isSelfHost) {
+      this.attachSelfHostSecretHandlers();
+    }
     if (this.activeTab === 'api-keys' || this.activeTab === 'mcp-clients') {
       void this.loadPlanLimitNotices();
     }
@@ -1152,7 +1159,123 @@ export class UnifiedSettings {
     }
   }
 
+  private renderSelfHostApiKeys(): string {
+    const sections = SETTINGS_CATEGORIES.map((cat) => {
+      const featureRows = cat.features
+        .map((fid) => {
+          const feature = RUNTIME_FEATURES.find((f) => f.id === fid);
+          if (!feature) return '';
+          const secrets = getEffectiveSecrets(feature);
+          const secretRows = secrets
+            .map((key) => {
+              const state = getSecretState(key);
+              const isPlaintext = PLAINTEXT_KEYS.has(key);
+              const label = HUMAN_LABELS[key] ?? key;
+              const signupUrl = SIGNUP_URLS[key];
+              const statusClass = state.valid ? 'ok' : state.present ? 'warn' : 'missing';
+              const statusText = state.valid ? '✓' : state.present ? 'Invalid' : 'Not set';
+              const getKeyLink = signupUrl
+                ? `<a href="${signupUrl}" target="_blank" rel="noopener noreferrer" class="runtime-secret-link">Get key</a>`
+                : '';
+              return `
+              <div class="runtime-secret-row">
+                <div class="runtime-secret-key"><code>${escapeHtml(label)}</code></div>
+                <span class="runtime-secret-status ${statusClass}">${escapeHtml(statusText)}</span>
+                <div class="runtime-input-wrapper${signupUrl ? ' has-suffix' : ''}">
+                  <input type="${isPlaintext ? 'text' : 'password'}" data-self-host-secret="${escapeHtml(key)}" placeholder="${state.present ? '•••••• (saved)' : 'Enter key…'}" autocomplete="off" class="runtime-secret-input" ${state.present && !isPlaintext ? 'value=""' : ''}>
+                  ${getKeyLink}
+                </div>
+              </div>`;
+            })
+            .join('');
+          return `
+          <div class="self-host-feature-card">
+            <div class="self-host-feature-name">${escapeHtml(feature.name)}</div>
+            <div class="self-host-feature-desc">${escapeHtml(feature.description)}</div>
+            <div class="self-host-feature-fallback">${escapeHtml(feature.fallback)}</div>
+            ${secretRows}
+          </div>`;
+        })
+        .join('');
+      if (!featureRows) return '';
+      return `
+      <details class="wm-pref-group self-host-secrets-group">
+        <summary>${escapeHtml(cat.label)}</summary>
+        <div class="wm-pref-group-content">${featureRows}</div>
+      </details>`;
+    }).filter(Boolean).join('');
+
+    const infoIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
+    return `
+      <div class="self-host-api-keys">
+        <div class="self-host-banner">
+          <div class="self-host-banner-icon">${infoIcon}</div>
+          <div class="self-host-banner-text">
+            <strong>Self-Host Mode</strong> — All Pro features are unlocked. API keys are stored locally in your browser and never sent to a server. Keys entered here are used by the app to fetch data directly.
+          </div>
+        </div>
+        ${sections}
+        <div class="self-host-save-bar">
+          <button class="btn btn-primary self-host-save-btn">Save Keys</button>
+          <span class="self-host-save-status" id="selfHostSaveStatus" aria-live="polite"></span>
+        </div>
+      </div>`;
+  }
+
+  private attachSelfHostSecretHandlers(): void {
+    const saveBtn = this.overlay.querySelector<HTMLButtonElement>('.self-host-save-btn');
+    const statusEl = this.overlay.querySelector<HTMLElement>('#selfHostSaveStatus');
+    if (!saveBtn) return;
+
+    saveBtn.addEventListener('click', async () => {
+      const inputs = this.overlay.querySelectorAll<HTMLInputElement>('input[data-self-host-secret]');
+      let saved = 0;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      for (const input of inputs) {
+        const key = input.dataset.selfHostSecret as RuntimeSecretKey | undefined;
+        if (!key) continue;
+        const raw = input.value.trim();
+        if (raw) {
+          const { setSecretValue } = await import('@/services/runtime-config');
+          await setSecretValue(key, raw);
+          saved++;
+          input.value = '';
+          input.placeholder = '•••••• (saved)';
+        } else if (raw === '' && input.placeholder.includes('saved')) {
+          // Empty input on a previously-saved key — keep it (no-op)
+        }
+      }
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Keys';
+      if (statusEl) {
+        statusEl.textContent = saved > 0 ? `${saved} key${saved > 1 ? 's' : ''} saved` : 'No changes';
+        statusEl.style.color = saved > 0 ? 'var(--color-ok, #34d399)' : 'var(--text-faint, #888)';
+      }
+      if (saved > 0) {
+        setTrustedHtml(
+          this.overlay.querySelector('[data-panel-id="api-keys"]') ?? this.overlay,
+          trustedHtml(this.renderSelfHostApiKeys(), 'self-host-api-keys'),
+        );
+        this.attachSelfHostSecretHandlers();
+      }
+    });
+
+    // Clear saved key when input is focused and has a saved placeholder
+    this.overlay.querySelectorAll<HTMLInputElement>('input[data-self-host-secret]').forEach((input) => {
+      input.addEventListener('focus', () => {
+        if (input.placeholder.includes('saved') && !input.value) {
+          input.placeholder = 'Enter new key to replace…';
+        }
+      });
+    });
+  }
+
   private renderApiKeysContent(): string {
+    if (isSelfHost) {
+      return this.renderSelfHostApiKeys();
+    }
+
     const authState = getAuthState();
 
     if (!authState.user) {
