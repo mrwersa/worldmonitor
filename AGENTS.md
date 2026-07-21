@@ -307,6 +307,13 @@ Server-side entitlement map at `server/_shared/entitlement-check.ts:ENDPOINT_ENT
 - New data sources MUST have bootstrap hydration wired in `api/bootstrap.js`
 - Redis seed scripts MUST write `seed-meta:<key>` for health monitoring
 
+## Testing & Refactoring Conventions (learned from PR #5 review)
+
+- **Don't hand-copy logic into tests.** If a function lives in a side-effectful monolith (e.g. `scripts/ais-relay.cjs`, 11k+ lines, no `module.exports`, starts a server on `require()`), extract the pure logic into `scripts/lib/<name>.cjs` following the existing pattern (`usni-fleet-parser.cjs`, `iran-events-parser.mjs`, `telegram-channel-merge.cjs`). Then test the *imported* module — a duplicated copy drifts and gives false-green tests.
+- **Preserve error-reporting state on refactor.** When refactoring a `load*()` function, keep any `lastError` / state-mutation it previously did for the `/status` or health endpoint. My initial merge refactor silently dropped `telegramState.lastError` — a corrupted base file would degrade to zero channels with no diagnostic. The error must surface (base file = required, ENOENT = error; local override = optional, ENOENT = silent; a present-but-broken file = error either way).
+- **Use `e.code === 'ENOENT'`, not `e.message?.includes('no such file')`.** Node sets a structured `code` on filesystem errors; string-matching the message is locale-fragile and broke in some environments.
+- **New `scripts/lib/*.cjs` files need a `COPY` line in `Dockerfile.relay`.** The file isn't auto-included by the `COPY scripts/ais-relay.cjs` line — it's an explicit per-file COPY list, guarded by `tests/dockerfile-relay-imports.test.mjs` (transitive-closure check). Run that test after adding any new `scripts/lib/` import.
+
 ## External References
 
 - [Architecture (system reference)](ARCHITECTURE.md)
