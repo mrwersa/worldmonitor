@@ -191,13 +191,21 @@ Variant is set via `VITE_VARIANT` env var. Config lives in `src/config/variants/
 
 ## CI Checks (GitHub Actions)
 
+Twenty-one workflows live in `.github/workflows/`. The agent-relevant ones for merge readiness:
+
 | Workflow | Trigger | What it checks |
 |---|---|---|
-| `typecheck.yml` | PR + push to main | `tsc --noEmit` for src and API |
+| `typecheck.yml` | PR + push to `main` | `tsc --noEmit` (src) and `typecheck:api` |
+| `test.yml` | PR + push to `main` | `npm run test:data` + sidecar/handler tests |
+| `lint-code.yml` | PR + push | biome lints (`npm run lint`) |
 | `lint.yml` | PR (markdown changes) | markdownlint-cli2 |
 | `proto-check.yml` | PR (proto changes) | Generated code freshness |
+| `security-audit.yml` | PR + push + schedule | npm audit advisories |
+| `deploy-gate.yml` | `workflow_run` after Test/Typecheck/Lint/Security | Required status gate; blocks merge unless the upstream workflows pass |
 | `build-desktop.yml` | Manual | Tauri desktop build |
 | `test-linux-app.yml` | Manual | Linux AppImage smoke test |
+
+`deploy-gate.yml` is the merge gate — required statuses roll up to it, not to the individual jobs.
 
 ## Pre-Push Hook
 
@@ -218,6 +226,34 @@ Heavy checks (`test:data`, typechecks, edge-bundle) must run **sequentially** in
 - **After pushing a PR:** do not sleep-poll CI. Start `gh pr checks <n> --watch` as a background task, or report the current check state; never turn on auto-merge without the explicit approval above.
 - **docs/plans/ is gitignored** — plan documents are local working state and do not travel between worktrees or ship in PRs.
 - **PR-review verification:** never assert a finding is fixed/stale from memory — re-fetch the PR head SHA and diff the cited lines first.
+
+## Roadmap: Iran / War-Monitoring Focus
+
+Product direction (started 2026-07-21): tilt WorldMonitor toward Iran as the primary focus, with Russia-Ukraine and China/Taiwan as correlated theaters. Build on existing infrastructure (CII, `src/services/correlation-engine/`, the Alert Rule country-scope notification pipeline, the Telegram-channel curated-source pattern) rather than standing up parallel systems per theater.
+
+**Multiple agents may work this list concurrently.** Before starting an item: check `git log`, open PRs (`gh pr list`), and other worktrees (`git worktree list`) per Shipping Velocity above. Update the status marker when you start/finish an item so concurrent agents don't collide.
+
+### Tier 0 — Reactivate & refocus
+- [x] Reactivate Iran events domain code path: country-attributed (`countryCode`) events now publish `conflict_escalation` notifications through the existing `wm:events:queue` pipeline (`scripts/seed-iran-events.mjs`), so Alert Rule country-scoped rules fire on Iran/Israel/Gulf strikes. Comments across the domain's `*_ENABLED` gates reframed from "sunset (war ended)" to "opt-in steady-state monitor." **Still required to go live**: set `IRAN_EVENTS_ENABLED=true` and `VITE_ENABLE_IRAN_ATTACKS=true` in your own deployment's Vercel/Railway env vars — these are dashboard settings, not repo state (`scripts/railway-services.json` only declares required var *names*).
+- [ ] Iran mission preset bundling Hormuz Tracker + OREF + Iran CII + Iran ACLED/GDELT + Iran Telegram channels.
+
+### Tier 1 — Near-term
+- [ ] X/Twitter OSINT ingestion — curated handle list (`data/x-accounts.json` mirroring `data/telegram-channels.json`), official X API only (no scraping/Nitter — ToS risk), feed through the existing AI-classification path, register as a `correlation-engine` escalation adapter input. Biggest capability gap: repo has zero X/Twitter data ingestion today.
+- [ ] Ukraine front-line layer — pull deepstatemap.live's public geojson API (existing Telegram ingestion of `DeepStateUA` is raw text only, not parsed into map data), add a deck.gl polygon layer with daily territorial-change deltas.
+- [ ] Iran nuclear-site layer — curated facility registry (Natanz, Fordow, Isfahan, Arak, Bushehr) following the `data/gamma-irradiators.json` + `src/config/irradiators.ts` pattern, cross-referenced with the "nuclear" keyword already tracked in `src/services/correlation-engine/adapters/escalation.ts`.
+
+### Tier 2 — Medium-term
+- [ ] Taiwan Strait PLA ADIZ-incursion counter (Taiwan MND publishes daily reports publicly).
+- [ ] Cross-theater "Escalation Convergence" view aggregating `correlation-engine` convergence cards across Iran/Ukraine/Taiwan into one ranked view.
+- [ ] Event-type alert scoping (beyond the existing country scope) in the Alert Rule system.
+- [ ] Iranian proxy-network ("Axis of Resistance") actor map using ACLED actor-level attribution (Houthis, Hezbollah, Kata'ib Hezbollah, PMF).
+
+### Tier 3 — Bigger bets
+- [ ] Iran connectivity kill-switch detection (IODA / Cloudflare Radar outage APIs) feeding CII's Information component.
+- [ ] Rial black-market exchange-rate tracker as a regime-stress leading indicator.
+- [ ] Hormuz war-risk insurance premium tracking (Lloyd's/JWC listed areas).
+- [ ] ADS-B sortie-pattern anomaly detection near the Israel/Iran border, using the existing military callsign registry (`src/config/military.ts`).
+- [ ] Dedicated `iran.worldmonitor.app` variant bundling the above, following the existing variant-system pattern.
 
 ## Deployment
 

@@ -66,8 +66,9 @@ import { getBisCreditData, getChinaMacroSnapshotData } from '@/services/economic
 import { chinaSummaryState, toObservedDate } from '@/app/china-summary-state';
 import { EconomicServiceClient, IntelligenceServiceClient, MarketServiceClient, TradeServiceClient } from '@/services/generated-rpc-clients';
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF: no strikes in the
-// country deep-dive or the AI brief. Set VITE_ENABLE_IRAN_ATTACKS=true to restore.
+// Iran-events domain: opt-in steady-state conflict monitor, off by default —
+// no strikes in the country deep-dive or the AI brief while disabled. Set
+// VITE_ENABLE_IRAN_ATTACKS=true to enable.
 // Guarded with the client-runtime check so node:test never dereferences import.meta.env.
 const IRAN_ATTACKS_ENABLED = typeof window !== 'undefined' && import.meta.env.VITE_ENABLE_IRAN_ATTACKS === 'true';
 

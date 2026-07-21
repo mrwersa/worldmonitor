@@ -31,6 +31,7 @@ const PRODUCER_FILES = [
   { path: 'scripts/ais-relay.cjs',                     expected: 'domain' },
   { path: 'scripts/seed-aviation.mjs',                  expected: 'domain' },
   { path: 'scripts/regional-snapshot/alert-emitter.mjs', expected: 'domain' },
+  { path: 'scripts/seed-iran-events.mjs',                expected: 'domain' },
   // Browser-side RSS producer
   { path: 'src/services/breaking-news-alerts.ts',       expected: 'rss' },
   // Server-side RSS producer: watchlist_story_alert events built from

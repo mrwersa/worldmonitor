@@ -334,11 +334,11 @@ const VARIANT_LAYER_ORDER: Record<MapVariant, Array<keyof MapLayers>> = {
 
 const I18N_PREFIX = 'components.deckgl.layers.';
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF: hide the layer
-// from the picker (getLayersForVariant), strip it from any restored MapLayers
-// (getAllowedLayerKeys → sanitizeLayersForVariant), and make CMD+K skip it
-// (isLayerExecutable). Set VITE_ENABLE_IRAN_ATTACKS=true (+ backend
-// IRAN_EVENTS_ENABLED=true) and rebuild to restore. Mirrors CYBER_LAYER_ENABLED.
+// Iran-events domain: opt-in steady-state conflict monitor, off by default.
+// While off, hide the layer from the picker (getLayersForVariant), strip it
+// from any restored MapLayers (getAllowedLayerKeys → sanitizeLayersForVariant),
+// and make CMD+K skip it (isLayerExecutable). Set VITE_ENABLE_IRAN_ATTACKS=true
+// (+ backend IRAN_EVENTS_ENABLED=true) and rebuild to enable. Mirrors CYBER_LAYER_ENABLED.
 // Guarded with isClientRuntime so `import.meta.env` (undefined under node:test,
 // where this config module is imported directly) is never dereferenced there —
 // see src/services/maritime/index.ts and tests/browser-bundle-secret-guard.

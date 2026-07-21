@@ -63,9 +63,9 @@ const HEALTH_VERDICT_RELEASE_LOCK_SCRIPT = [
   'return 0',
 ].join('\n');
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF everywhere; set
-// IRAN_EVENTS_ENABLED=true to restore the whole domain. Mirrors the backend
-// *_ENABLED env idiom (server/worldmonitor/resilience/v1/_shared.ts).
+// Iran-events domain: opt-in steady-state conflict monitor, off by default
+// everywhere; set IRAN_EVENTS_ENABLED=true to enable the whole domain. Mirrors
+// the backend *_ENABLED env idiom (server/worldmonitor/resilience/v1/_shared.ts).
 const IRAN_EVENTS_ENABLED = (process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() === 'true';
 
 const BOOTSTRAP_KEYS = {
@@ -590,9 +590,9 @@ const SEED_META = {
   webcams:                 { key: 'seed-meta:webcam:cameras:geo',                   maxStaleMin: 1440 }, // seed-webcams writes 24h geo/meta keys plus a 30h active pointer; stale at 24h before the layer goes blank.
 };
 
-// Iran-events sunset: when disabled (default), drop it from all health
+// Iran-events domain: when disabled (default), drop it from all health
 // classification so the deliberately-dormant manual seed can't raise
-// STALE_SEED (present-but-stale) or EMPTY (absent). Re-enabling restores both.
+// STALE_SEED (present-but-stale) or EMPTY (absent). Enabling restores both.
 if (!IRAN_EVENTS_ENABLED) {
   delete BOOTSTRAP_KEYS.iranEvents;
   delete SEED_META.iranEvents;

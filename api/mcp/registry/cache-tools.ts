@@ -33,11 +33,12 @@ import {
   PREDICTION_MARKETS_UI_URI,
 } from '../ui/registry';
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF: drop the dormant
-// conflict:iran-events:v1 key from the get_conflict_events cache set so the MCP
-// tool stops serving the stale snapshot that lingers for the key's 14-day TTL.
-// The output schema still documents an iran-events field (harmless when absent).
-// Set IRAN_EVENTS_ENABLED=true to restore. See api/health.js.
+// Iran-events domain: opt-in steady-state conflict monitor, off by default —
+// drop the dormant conflict:iran-events:v1 key from the get_conflict_events
+// cache set while disabled, so the MCP tool doesn't serve a stale snapshot
+// that lingers for the key's 14-day TTL. The output schema still documents
+// an iran-events field (harmless when absent). Set IRAN_EVENTS_ENABLED=true
+// to enable. See api/health.js.
 const IRAN_EVENTS_ENABLED = (process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() === 'true';
 
 export const CACHE_TOOLS: ToolDef[] = [

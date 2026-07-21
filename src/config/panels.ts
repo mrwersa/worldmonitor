@@ -9,8 +9,8 @@ import { isEntitled } from '@/services/entitlements';
 
 const _desktop = isDesktopRuntime();
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF: iranAttacks is
-// disabled in every variant default so DEFAULT_MAP_LAYERS agrees with the gated
+// Iran-events domain: opt-in steady-state conflict monitor, off by default.
+// iranAttacks is disabled in every variant default so DEFAULT_MAP_LAYERS agrees with the gated
 // layer registry (getAllowedLayerKeys strips it). Guarded so node:test — where
 // import.meta.env is undefined — resolves it OFF at module load. See
 // map-layer-definitions.ts and tests/browser-bundle-secret-guard (allowlist).

@@ -54,9 +54,10 @@ const CANONICAL_KEY = 'forecast:predictions:v2';
 // canonical key above keeps the dossiers for the RPC, MCP and chat-analyst.
 const DASHBOARD_KEY = 'forecast:predictions-bootstrap:v1';
 const PRIOR_KEY = 'forecast:predictions:prior:v2';
-// Iran-events domain sunset (war ended 2026-07). Default OFF: the strike feed
-// no longer seeds forecast inputs or critical signals (even while the canonical
-// key's 14d TTL still holds a stale snapshot). IRAN_EVENTS_ENABLED=true restores.
+// Iran-events domain: opt-in steady-state conflict monitor, off by default —
+// the strike feed doesn't seed forecast inputs or critical signals while
+// disabled (even though the canonical key's 14d TTL may still hold a snapshot
+// from when it was last enabled). IRAN_EVENTS_ENABLED=true enables it.
 // Read at call time so it's robust to loadEnvFile() ordering.
 const iranEventsEnabled = () => (process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() === 'true';
 const HISTORY_KEY = 'forecast:predictions:history:v1';
