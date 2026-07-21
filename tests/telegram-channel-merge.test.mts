@@ -1,41 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import telegramChannelMerge from '../scripts/lib/telegram-channel-merge.cjs';
 
-// Mirror the merge logic from scripts/ais-relay.cjs — these functions are
-// extracted for testability since the relay is a monolithic .cjs file.
-// The tests validate the contract: base + local = merged, local overrides.
+// Imports the REAL implementation from scripts/lib/telegram-channel-merge.cjs
+// (extracted specifically so it's safely importable — see that file's header
+// comment) rather than a hand-copied duplicate. scripts/ais-relay.cjs itself
+// can't be required directly in a test: it's an 11k+ line monolithic script
+// with heavy top-level side effects (server startup, live polling loops).
 
-function readChannelFile(filePath: string, set: string) {
-  try {
-    const raw = JSON.parse(readFileSync(filePath, 'utf8'));
-    const bucket = raw?.channels?.[set];
-    const channels = Array.isArray(bucket) ? bucket : [];
-    return channels
-      .filter((c: Record<string, unknown>) => c && typeof c.handle === 'string' && c.handle.length > 1 && c.enabled !== false)
-      .map((c: Record<string, unknown>) => ({
-        handle: String(c.handle).replace(/^@/, ''),
-        label: c.label ? String(c.label) : undefined,
-        topic: c.topic ? String(c.topic) : undefined,
-        region: c.region ? String(c.region) : undefined,
-        tier: c.tier != null ? Number(c.tier) : undefined,
-        enabled: c.enabled !== false,
-        maxMessages: c.maxMessages != null ? Number(c.maxMessages) : undefined,
-      }));
-  } catch {
-    return [];
-  }
-}
-
-function mergeChannels(base: ReturnType<typeof readChannelFile>, local: ReturnType<typeof readChannelFile>) {
-  if (!local.length) return base;
-  const merged = new Map<string, (typeof base)[number]>();
-  for (const c of base) merged.set(c.handle, c);
-  for (const c of local) merged.set(c.handle, c);
-  return Array.from(merged.values());
-}
+const { readChannelFile, mergeChannels } = telegramChannelMerge;
 
 let tmpDir: string;
 
@@ -56,25 +32,55 @@ test('telegram-channels: base file loaded, local empty — returns base', () => 
   });
   const localPath = writeChannelFile('local.json', { channels: { full: [] } });
 
-  const base = readChannelFile(basePath, 'full');
-  const local = readChannelFile(localPath, 'full');
-  const merged = mergeChannels(base, local);
+  const base = readChannelFile(basePath, 'full', { optional: false });
+  const local = readChannelFile(localPath, 'full', { optional: true });
+  const merged = mergeChannels(base.channels, local.channels);
 
   assert.equal(merged.length, 1);
   assert.equal(merged[0].handle, 'testChan');
+  assert.equal(base.error, null);
+  assert.equal(local.error, null);
 });
 
-test('telegram-channels: local file missing — returns base', () => {
+test('telegram-channels: local file missing — returns base, no error (expected steady state)', () => {
   const basePath = writeChannelFile('base.json', {
     channels: { full: [{ handle: 'testChan', label: 'Test', topic: 'news', tier: 2, enabled: true, region: 'global', maxMessages: 10 }] }
   });
   const missingPath = join(tmpDir, 'does-not-exist.json');
 
-  const base = readChannelFile(basePath, 'full');
-  const local = readChannelFile(missingPath, 'full');
-  const merged = mergeChannels(base, local);
+  const base = readChannelFile(basePath, 'full', { optional: false });
+  const local = readChannelFile(missingPath, 'full', { optional: true });
+  const merged = mergeChannels(base.channels, local.channels);
 
   assert.equal(merged.length, 1);
+  assert.equal(local.error, null, 'a missing OPTIONAL file must not report an error');
+});
+
+test('telegram-channels: missing REQUIRED (base) file reports an error', () => {
+  const missingPath = join(mkdtempSync(join(tmpdir(), 'wm-tg-test-')), 'does-not-exist.json');
+
+  const base = readChannelFile(missingPath, 'full', { optional: false });
+
+  assert.equal(base.channels.length, 0);
+  assert.ok(base.error, 'a missing REQUIRED file must report an error (regression: this used to be silently swallowed, dropping telegramState.lastError and the /status endpoint visibility it feeds)');
+  assert.match(base.error!, /does-not-exist\.json/);
+});
+
+test('telegram-channels: a local file that exists but fails to parse reports an error, not silence', () => {
+  const basePath = writeChannelFile('base.json', {
+    channels: { full: [{ handle: 'testChan', label: 'Test', topic: 'news', tier: 2, enabled: true, region: 'global', maxMessages: 10 }] }
+  });
+  const badLocalPath = join(tmpDir, 'local-broken.json');
+  writeFileSync(badLocalPath, '{ this is not valid json');
+
+  const base = readChannelFile(basePath, 'full', { optional: false });
+  const local = readChannelFile(badLocalPath, 'full', { optional: true });
+  const merged = mergeChannels(base.channels, local.channels);
+
+  // Base channels still load fine — a broken override doesn't take down the base set.
+  assert.equal(merged.length, 1);
+  // But the operator should be told their override isn't being applied.
+  assert.ok(local.error, 'a local file that exists but fails to parse must report an error even though it is optional');
 });
 
 test('telegram-channels: local channel overrides base by same handle', () => {
@@ -85,9 +91,9 @@ test('telegram-channels: local channel overrides base by same handle', () => {
     channels: { full: [{ handle: 'overlap', label: 'Overridden', topic: 'cyber', tier: 1, enabled: true, region: 'iran', maxMessages: 25 }] }
   });
 
-  const base = readChannelFile(basePath, 'full');
-  const local = readChannelFile(localPath, 'full');
-  const merged = mergeChannels(base, local);
+  const base = readChannelFile(basePath, 'full', { optional: false });
+  const local = readChannelFile(localPath, 'full', { optional: true });
+  const merged = mergeChannels(base.channels, local.channels);
 
   assert.equal(merged.length, 1);
   assert.equal(merged[0].label, 'Overridden');
@@ -105,9 +111,9 @@ test('telegram-channels: local channels added alongside base', () => {
     channels: { full: [{ handle: 'localChan', label: 'Local', topic: 'osint', tier: 3, enabled: true, region: 'iran', maxMessages: 15 }] }
   });
 
-  const base = readChannelFile(basePath, 'full');
-  const local = readChannelFile(localPath, 'full');
-  const merged = mergeChannels(base, local);
+  const base = readChannelFile(basePath, 'full', { optional: false });
+  const local = readChannelFile(localPath, 'full', { optional: true });
+  const merged = mergeChannels(base.channels, local.channels);
 
   assert.equal(merged.length, 2);
   assert.ok(merged.some(c => c.handle === 'baseChan'));
@@ -122,9 +128,9 @@ test('telegram-channels: disabled channels excluded', () => {
     channels: { full: [{ handle: 'disabled', label: 'Off', topic: 'osint', tier: 3, enabled: false, region: 'iran', maxMessages: 15 }] }
   });
 
-  const base = readChannelFile(basePath, 'full');
-  const local = readChannelFile(localPath, 'full');
-  const merged = mergeChannels(base, local);
+  const base = readChannelFile(basePath, 'full', { optional: false });
+  const local = readChannelFile(localPath, 'full', { optional: true });
+  const merged = mergeChannels(base.channels, local.channels);
 
   assert.equal(merged.length, 1);
   assert.equal(merged[0].handle, 'enabled');
@@ -134,10 +140,9 @@ test('telegram-channels: @-prefixed handles stripped', () => {
   const basePath = writeChannelFile('base.json', {
     channels: { full: [{ handle: '@atPrefix', label: 'Has At', topic: 'news', tier: 2, enabled: true, region: 'global', maxMessages: 10 }] }
   });
-  const localPath = writeChannelFile('local.json', { channels: { full: [] } });
 
-  const base = readChannelFile(basePath, 'full');
-  const merged = mergeChannels(base, []);
+  const base = readChannelFile(basePath, 'full', { optional: false });
+  const merged = mergeChannels(base.channels, []);
 
   assert.equal(merged.length, 1);
   assert.equal(merged[0].handle, 'atPrefix');
@@ -151,11 +156,11 @@ test('telegram-channels: different set keys isolate channels', () => {
     }
   });
 
-  const full = readChannelFile(basePath, 'full');
-  const tech = readChannelFile(basePath, 'tech');
+  const full = readChannelFile(basePath, 'full', { optional: false });
+  const tech = readChannelFile(basePath, 'tech', { optional: false });
 
-  assert.equal(full.length, 1);
-  assert.equal(full[0].handle, 'fullChan');
-  assert.equal(tech.length, 1);
-  assert.equal(tech[0].handle, 'techChan');
+  assert.equal(full.channels.length, 1);
+  assert.equal(full.channels[0].handle, 'fullChan');
+  assert.equal(tech.channels.length, 1);
+  assert.equal(tech.channels[0].handle, 'techChan');
 });

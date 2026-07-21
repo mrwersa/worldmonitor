@@ -19,7 +19,6 @@ const http = require('http');
 const https = require('https');
 const zlib = require('zlib');
 const path = require('path');
-const { readFileSync } = require('fs');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
@@ -28,6 +27,7 @@ const v8 = require('v8');
 const { WebSocketServer, WebSocket } = require('ws');
 const { parseProxyConfig, resolveProxyString } = require('./_proxy-utils.cjs');
 const { countryNameToIso2 } = require('./shared/country-name-to-iso2.cjs');
+const { readChannelFile, mergeChannels } = require('./lib/telegram-channel-merge.cjs');
 const {
   buildDedupMaterial,
   classifySetNxResult,
@@ -813,47 +813,26 @@ function loadTelegramChannels() {
   const p = path.join(__dirname, '..', 'data', 'telegram-channels.json');
   const localPath = path.join(__dirname, '..', 'data', 'telegram-channels.local.json');
 
-  const baseChannels = readChannelFile(p, set);
-  const localChannels = readChannelFile(localPath, set);
+  // Base file is required (tracked in git, should always exist and parse);
+  // any failure to load it — including missing — is a genuine problem and
+  // surfaces via telegramState.lastError (read by the /status endpoint).
+  // Local override is optional (most operators never create one); ENOENT
+  // there is the expected steady state, not an error. A local file that
+  // DOES exist but fails to parse is still surfaced, so an operator with a
+  // broken override finds out their channels aren't merged, not just that
+  // the base set silently kept working.
+  const base = readChannelFile(p, set, { optional: false });
+  const local = readChannelFile(localPath, set, { optional: true });
 
-  const merged = mergeChannels(baseChannels, localChannels);
-  telegramState.channels = merged;
+  telegramState.channels = mergeChannels(base.channels, local.channels);
+  telegramState.lastError = base.error || local.error || null;
+  if (telegramState.lastError) {
+    console.warn(`[Relay] ${telegramState.lastError}`);
+  }
   if (!telegramState.channels.length) {
     console.warn(`[Relay] Telegram channel set "${set}" is empty — no channels to poll`);
   }
   return telegramState.channels;
-}
-
-function readChannelFile(filePath, set) {
-  try {
-    const raw = JSON.parse(readFileSync(filePath, 'utf8'));
-    const bucket = raw?.channels?.[set];
-    const channels = Array.isArray(bucket) ? bucket : [];
-    return channels
-      .filter(c => c && typeof c.handle === 'string' && c.handle.length > 1 && c.enabled !== false)
-      .map(c => ({
-        handle: String(c.handle).replace(/^@/, ''),
-        label: c.label ? String(c.label) : undefined,
-        topic: c.topic ? String(c.topic) : undefined,
-        region: c.region ? String(c.region) : undefined,
-        tier: c.tier != null ? Number(c.tier) : undefined,
-        enabled: c.enabled !== false,
-        maxMessages: c.maxMessages != null ? Number(c.maxMessages) : undefined,
-      }));
-  } catch (e) {
-    if (!e.message?.includes('ENOENT') && !e.message?.includes('no such file')) {
-      console.warn(`[Relay] Failed to load telegram channels from ${filePath}: ${e.message || String(e)}`);
-    }
-    return [];
-  }
-}
-
-function mergeChannels(base, local) {
-  if (!local.length) return base;
-  const merged = new Map();
-  for (const c of base) merged.set(c.handle, c);
-  for (const c of local) merged.set(c.handle, c);
-  return Array.from(merged.values());
 }
 
 function normalizeTelegramMessage(msg, channel) {
