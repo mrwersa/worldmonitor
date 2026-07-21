@@ -19,6 +19,10 @@ RUN npm ci --ignore-scripts
 # Copy full source
 COPY . .
 
+# Self-host mode: pass VITE_SELF_HOST as a build arg so the client bundle
+# bakes in the entitlement bypass. Set WM_SELF_HOST=1 in .env to enable.
+ARG VITE_SELF_HOST
+
 # Compile TypeScript API handlers → self-contained ESM bundles
 # Output is api/**/*.js alongside the source .ts files
 RUN node docker/build-handlers.mjs
