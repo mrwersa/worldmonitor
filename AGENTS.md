@@ -227,33 +227,65 @@ Heavy checks (`test:data`, typechecks, edge-bundle) must run **sequentially** in
 - **docs/plans/ is gitignored** — plan documents are local working state and do not travel between worktrees or ship in PRs.
 - **PR-review verification:** never assert a finding is fixed/stale from memory — re-fetch the PR head SHA and diff the cited lines first.
 
-## Roadmap: Iran / War-Monitoring Focus
+## Roadmap: Personalized Self-Hosted Build
 
-Product direction (started 2026-07-21): tilt WorldMonitor toward Iran as the primary focus, with Russia-Ukraine and China/Taiwan as correlated theaters. Build on existing infrastructure (CII, `src/services/correlation-engine/`, the Alert Rule country-scope notification pipeline, the Telegram-channel curated-source pattern) rather than standing up parallel systems per theater.
+Product direction (reprioritized 2026-07-21): keep worldmonitor theater-agnostic per user direction ("remove the focus on Iran, leave it as generic"). Build on existing infrastructure (CII, `src/services/correlation-engine/`, Alert Rule country-scope notifications, the Telegram-channel curated-source pattern, the OpenRouter-wired LLM chain) rather than standing up parallel systems. Goal: **more signal, less noise — personalized AI briefings, geopolitical & equity researcher for the operator running this fork.**
 
 **Multiple agents may work this list concurrently.** Before starting an item: check `git log`, open PRs (`gh pr list`), and other worktrees (`git worktree list`) per Shipping Velocity above. Update the status marker when you start/finish an item so concurrent agents don't collide.
 
-### Tier 0 — Reactivate & refocus
-- [x] Reactivate Iran events domain code path: country-attributed (`countryCode`) events now publish `conflict_escalation` notifications through the existing `wm:events:queue` pipeline (`scripts/seed-iran-events.mjs`), so Alert Rule country-scoped rules fire on Iran/Israel/Gulf strikes. Comments across the domain's `*_ENABLED` gates reframed from "sunset (war ended)" to "opt-in steady-state monitor." **Still required to go live**: set `IRAN_EVENTS_ENABLED=true` and `VITE_ENABLE_IRAN_ATTACKS=true` in your own deployment's Vercel/Railway env vars — these are dashboard settings, not repo state (`scripts/railway-services.json` only declares required var *names*).
-- [ ] Iran mission preset bundling Hormuz Tracker + OREF + Iran CII + Iran ACLED/GDELT + Iran Telegram channels.
+**Every item ships as its own PR.** One roadmap bullet = one branch = one PR (see Shipping Velocity above for the push/PR workflow and merge-authority rule — opening a PR is fine on request, merging still needs explicit approval in that conversation). Don't bundle multiple bullets into one PR; it makes concurrent-agent collisions and review harder to reason about.
 
-### Tier 1 — Near-term
-- [ ] X/Twitter OSINT ingestion — curated handle list (`data/x-accounts.json` mirroring `data/telegram-channels.json`), official X API only (no scraping/Nitter — ToS risk), feed through the existing AI-classification path, register as a `correlation-engine` escalation adapter input. Biggest capability gap: repo has zero X/Twitter data ingestion today.
-- [ ] Ukraine front-line layer — pull deepstatemap.live's public geojson API (existing Telegram ingestion of `DeepStateUA` is raw text only, not parsed into map data), add a deck.gl polygon layer with daily territorial-change deltas.
-- [ ] Iran nuclear-site layer — curated facility registry (Natanz, Fordow, Isfahan, Arak, Bushehr) following the `data/gamma-irradiators.json` + `src/config/irradiators.ts` pattern, cross-referenced with the "nuclear" keyword already tracked in `src/services/correlation-engine/adapters/escalation.ts`.
+### Tier 0 — Self-host personalization (do first, unblocks everything)
 
-### Tier 2 — Medium-term
-- [ ] Taiwan Strait PLA ADIZ-incursion counter (Taiwan MND publishes daily reports publicly).
-- [ ] Cross-theater "Escalation Convergence" view aggregating `correlation-engine` convergence cards across Iran/Ukraine/Taiwan into one ranked view.
-- [ ] Event-type alert scoping (beyond the existing country scope) in the Alert Rule system.
-- [ ] Iranian proxy-network ("Axis of Resistance") actor map using ACLED actor-level attribution (Houthis, Hezbollah, Kata'ib Hezbollah, PMF).
+- [x] Iran domain reactivated (PR #1 merged): country-attributed events publish `conflict_escalation` via `wm:events:queue` so Alert Rules fire. **To go live**: set `IRAN_EVENTS_ENABLED=true` + `VITE_ENABLE_IRAN_ATTACKS=true` in your deployment env.
+- [ ] **Self-host entitlement bypass** — fork-local resolver that returns tier=3 (enterprise) when `WM_SELF_HOST=1`. Patch points: `server/_shared/entitlement-check.ts:checkEntitlementDetailed` (the 403 path), `src/services/widget-store.ts:isProUser()` (client), `src/services/entitlements.ts:171` (`isEntitled()`). Eliminates the Clerk + Dodo Payments + Convex dependency for self-hosters — unblocks every Pro feature in Tier 3. Keep the gate as-is when the env flag is unset (don't break hosted deploys).
+- [ ] **Local settings persistence (no forced sign-in)** — when Clerk is absent, persist per-feature API keys (`OPENROUTER_API_KEY`, `TELEGRAM_*`, `GROQ_API_KEY`, `FINNHUB_API_KEY`, `FRED_API_KEY`, `NASA_FIRMS_API_KEY`) to encrypted localStorage. Replace the "Sign in to unlock API Keys" message at `src/components/UnifiedSettings.ts:1163`. Web keyring path at `src/services/runtime-config.ts:461` is already a no-op stub — extend it. For desktop, keep the existing Tauri OS-keyring path unchanged.
+- [ ] **Genericize LiveUAMap parser** — rename `scripts/lib/iran-events-parser.mjs` → `liveuamap-parser.mjs`; lift `LOCATION_COORDS` + `LOCATION_COUNTRY` (`iran-events-parser.mjs:10-213`) into `data/liveuamap-regions/<region>.json` loaded by country code. The dump shape + `CATEGORY_MAP` + severity regexes are already region-agnostic (LiveUAMap uses the same `cat1…cat11` codes for every country map). Genericize before adding Ukraine / Taiwan / Israel-Iran theaters so each new theater is JSON-only.
+- [ ] **Telegram channel list bootstrap** — operator-provided channel list → `data/telegram-channels.json` (format unchanged per `:1-15` operator comment: handle/label/topic/tier/enabled/region/maxMessages). Run `scripts/telegram/session-auth.mjs` to mint `TELEGRAM_SESSION`; set `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION`, `TELEGRAM_CHANNEL_SET=full` on the relay container. Relay load path is already wired at `scripts/ais-relay.cjs:811-843`. Note the file is product-managed (data file says "Not user-configurable"); for self-host override, the fork can drop that comment and ship a `data/telegram-channels.local.json` override loader.
 
-### Tier 3 — Bigger bets
-- [ ] Iran connectivity kill-switch detection (IODA / Cloudflare Radar outage APIs) feeding CII's Information component.
-- [ ] Rial black-market exchange-rate tracker as a regime-stress leading indicator.
-- [ ] Hormuz war-risk insurance premium tracking (Lloyd's/JWC listed areas).
-- [ ] ADS-B sortie-pattern anomaly detection near the Israel/Iran border, using the existing military callsign registry (`src/config/military.ts`).
-- [ ] Dedicated `iran.worldmonitor.app` variant bundling the above, following the existing variant-system pattern.
+### Tier 1 — Persian sources + AI briefings (high signal, low cost)
+
+- [ ] **Native Persian RSS feeds** — add Mehr (`https://www.mehrnews.com/rss`), IRNA (`https://irna.ir/rss` — note `.ir` not `.org`), ISNA (`https://www.isna.ir/rss`). All three verified live on the Saba CMS, same platform as the existing `en.mehrnews.com` / `en.irna.ir` entries in `src/config/feeds.ts:310-314`. Today's Iran feeds all ingest English versions or Google News proxies — native Persian text is the open gap. Add `{ language: 'fa' }` metadata so they pair with the existing `fa.json` locale and RTL rendering.
+- [ ] **GDELT Persian-language filter** — wrap `https://api.gdeltproject.org/api/v2/doc/doc` with `sourcelang:persian` + `sourcecountry:iran` as `api/gdelt-fa.js`. Verified free, no API key, supports JSON / RSS output. Got 429 in test → cache 5–10 min via `cachedFetchJson()` and throttle.
+- [ ] **Confirm OpenRouter wiring** — already the default primary provider (`server/_shared/llm.ts:103`, default model `deepseek/deepseek-v4-flash`). Set `OPENROUTER_API_KEY` in `.env`; document overrides `LLM_REASONING_PROVIDER=openrouter` + `LLM_REASONING_MODEL=qwen/qwen-3-235b-instruct` (better Persian than deepseek) in `.env.example`. Streaming + `response_format:json_schema` structured outputs both verified supported on OpenRouter.
+- [ ] **Local AI briefings cadence** — current `scripts/seed-digest-notifications.mjs`, `scripts/regional-snapshot/{narrative,weekly-brief}.mjs`, `scripts/seed-forecasts.mjs:market_implications` are Railway-cron-only. Bring them into docker-compose as scheduled one-shot containers, or trigger on demand via `docker compose exec`. Output briefs to Redis then `docker compose logs worldmonitor` for the dashboard to read.
+
+### Tier 2 — Personalized equity / geopolitical researcher agent
+
+- [ ] **Self-host chat-analyst persistence** — `chat-analyst` panel calls `api/chat-analyst.ts`; brief / Q&A history currently keyed by Clerk user id (`brief:{clerkUserId}:{date}` — see the comment in `src/app/panel-layout.ts` above `WEB_CLERK_PRO_ONLY_PANELS`, line drifts so don't pin it). For self-host, fall back to a local user-id (`wm-self` or `LOCAL_API_TOKEN`) when Clerk JWT absent.
+- [ ] **Equity research skill** — extend chat-analyst with "researcher" mode using OpenRouter structured outputs (`response_format: json_schema`, verified). Multi-step synthesis: Finnhub fundamentals + Yahoo price + GDELT news-with-tone + ACLED actor events → structured `{thesis, risk, sources[]}` output. Persist Q&A history locally (no Convex) — `convex/apiKeys.ts` etc. need local-store fallbacks.
+- [ ] **Persian-aware daily brief** — the regional-snapshot `narrative.mjs:426-481` already calls `callLlm`. Suffix the prompt with the operator's `followedCountries` (today `convex/followedCountries.ts` only — add a local JSON equivalent under `data/local-user-prefs.json` loaded when Clerk absents). Mix Persian + English primary sources, render the brief in either language based on `wm-locale-explicit`.
+
+### Tier 3 — Pro-feature self-implementation (gated by Tier 0 entitlement bypass)
+
+Server-side entitlement map at `server/_shared/entitlement-check.ts:ENDPOINT_ENTITLEMENTS` (lines `:76-97`). After the bypass lands, each becomes usable; verify handler still routes through OpenRouter (`server/worldmonitor/<domain>/v1/*.ts`):
+
+- [ ] Forecast simulation (`/api/forecast/v1/trigger-simulation`)
+- [ ] AI stock analysis + backtest (`/api/market/v1/{analyze-stock,backtest-stock,get-stock-analysis-history,list-stored-stock-backtests}`)
+- [ ] Situational deduction + event classification (`/api/intelligence/v1/{deduct-situation,classify-event}`) — **verified these are gated differently**: `classify-event` is in `ENDPOINT_ENTITLEMENTS` (the Tier 0 bypass target), but `deduct-situation` is NOT — it's absent from that map and instead capped by a separate daily-quota system (`server/_shared/direct-llm-quota.ts:DIRECT_LLM_DAILY_QUOTA_LIMIT`, currently 50/day via `PRO_DAILY_QUOTA_TTL_SECONDS`). The Tier 0 entitlement bypass alone won't unlock unlimited `deduct-situation` — that quota also needs raising/removing for self-host.
+- [ ] Supply-chain routing (8 `/api/supply-chain/v1/*` paths)
+- [ ] Trade flows + tariff trends (`/api/trade/v1/*`)
+- [ ] Sanctions pressure + global tenders (`/api/sanctions/v1/list-sanctions-pressure`, `/api/economic/v1/list-global-tenders`)
+- [ ] Scenario engine (`/api/scenario/v1/{run-scenario,get-scenario-status}`)
+- [ ] Regional Intelligence Board narratives (cron scripts in `scripts/regional-snapshot/`)
+- [ ] MCP self-host (`mcpAccess===true` on `PremiumCallerIdentity` at `server/_shared/premium-check.ts:62-64`)
+
+### Generic / backlog (reprioritized out of Iran-only)
+
+- [ ] X/Twitter OSINT ingestion (`data/x-accounts.json` mirroring telegram-channels.json) — biggest repo capability gap, no X ingestion today.
+- [ ] Ukraine front-line layer via deepstatemap.live public geojson — generic region template (use the LiveUAMap abstraction from Tier 0).
+- [ ] Taiwan Strait PLA ADIZ-incursion counter (Taiwan MND publishes daily reports).
+- [ ] Cross-theater "Escalation Convergence" view aggregating `correlation-engine` convergence cards across all active theaters.
+- [ ] Event-type alert scoping (beyond existing country scope).
+- [ ] Regional proxy-network actor map using ACLED actor-level attribution (generic — any axis / coalition).
+- [ ] Connectivity kill-switch detection (IODA / Cloudflare Radar outage APIs) feeding CII's Information component.
+- [ ] Black-market FX tracker (Rial or otherwise) as regime-stress leading indicator — region-parameterized.
+
+### Out of scope / deprioritized
+
+- **Maritime AIS**: aisstream.io OAuth currently broken on their backend (`dial tcp: lookup github.com ... write: operation not permitted` — their DNS sandbox issue). AISHub requires operating a physical receiver (data-exchange co-op); MarineTraffic now Kpler-owned enterprise-sales-only; no verified free HTTP AIS endpoint exists; SDR requires coastal hardware. Recommendation: leave `docker compose stop ais-relay`; revisit when aisstream.io recovers. Not viable to self-host.
+- **Dedicated `iran.worldmonitor.app` variant**: per operator direction, keep theater-generic. Use the existing `full` variant with operator-followed countries.
+- **Clerk / Dodo Payments / Convex stack for self-hosted deploys**: replaced by Tier 0 entitlement bypass + local-store. Do not stand up paid SaaS dependencies for personal use.
 
 ## Deployment
 
