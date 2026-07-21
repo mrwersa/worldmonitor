@@ -12,6 +12,7 @@
  */
 
 import { getCachedJson, setCachedJson } from './redis';
+import { isSelfHost, SELF_HOST_ENTITLEMENT } from './self-host';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -266,6 +267,11 @@ export async function checkEntitlementDetailed(
   if (requiredTier === null) {
     // Unrestricted endpoint -- no check needed
     return { response: null, entitlements: null };
+  }
+
+  // Self-host bypass: skip Clerk/Convex/Dodo entirely (server/_shared/self-host.ts).
+  if (isSelfHost) {
+    return { response: null, entitlements: SELF_HOST_ENTITLEMENT };
   }
 
   if (!userId) {

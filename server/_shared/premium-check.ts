@@ -10,6 +10,7 @@ import {
   getInternalMcpVerifiedNonce,
 } from './mcp-internal-hmac';
 import { validateUserApiKey } from './user-api-key';
+import { isSelfHost, SELF_HOST_PREMIUM_IDENTITY } from './self-host';
 
 export type PremiumCallerIdentity =
   | { isPremium: true; userId: string; kind: 'internal-mcp'; quotaExempt: true }
@@ -21,6 +22,11 @@ export type PremiumCallerIdentity =
  * Resolves premium status and the user-bound identity for spend controls.
  */
 export async function resolvePremiumCallerIdentity(request: Request): Promise<PremiumCallerIdentity> {
+  // Self-host bypass: all callers are premium (server/_shared/self-host.ts).
+  if (isSelfHost) {
+    return SELF_HOST_PREMIUM_IDENTITY;
+  }
+
   // Internal-MCP context: trusted markers are set by the gateway AFTER an
   // HMAC verification on `X-WM-MCP-Internal` succeeds. Inbound copies of
   // these headers are stripped at the gateway entry (defense-in-depth) so

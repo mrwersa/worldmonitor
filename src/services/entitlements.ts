@@ -8,6 +8,7 @@
  */
 
 import { getConvexClient, getConvexApi, waitForConvexAuth } from './convex-client';
+import { isSelfHost } from './self-host';
 
 export interface EntitlementState {
   planKey: string;
@@ -152,6 +153,7 @@ export function getEntitlementState(): EntitlementState | null {
  * Check whether a specific feature flag is truthy in the current entitlement state.
  */
 export function hasFeature(flag: keyof EntitlementState['features']): boolean {
+  if (isSelfHost) return true;
   if (currentState === null) return false;
   return Boolean(currentState.features[flag]);
 }
@@ -160,6 +162,7 @@ export function hasFeature(flag: keyof EntitlementState['features']): boolean {
  * Check whether the user's tier meets or exceeds the given minimum.
  */
 export function hasTier(minTier: number): boolean {
+  if (isSelfHost) return true;
   if (currentState === null) return false;
   return currentState.features.tier >= minTier;
 }
@@ -169,6 +172,7 @@ export function hasTier(minTier: number): boolean {
  * Returns true if entitlement data exists, plan is not free, and hasn't expired.
  */
 export function isEntitled(): boolean {
+  if (isSelfHost) return true;
   return (
     currentState !== null &&
     currentState.planKey !== 'free' &&

@@ -16,6 +16,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_SELF_HOST: "${WM_SELF_HOST:-}"
     image: worldmonitor:latest
     container_name: worldmonitor
     ports:
@@ -26,6 +28,7 @@ services:
       LOCAL_API_PORT: "46123"
       LOCAL_API_MODE: "docker"
       LOCAL_API_CLOUD_FALLBACK: "false"
+      WM_SELF_HOST: "${WM_SELF_HOST:-}"
       WS_RELAY_URL: "http://ais-relay:3004"
       # LLM provider (any OpenAI-compatible endpoint)
       LLM_API_URL: "${LLM_API_URL:-}"

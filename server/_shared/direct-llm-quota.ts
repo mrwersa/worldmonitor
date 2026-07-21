@@ -1,5 +1,6 @@
 import { getKeyPrefix } from './redis';
 import { PRO_DAILY_QUOTA_TTL_SECONDS, secondsUntilUtcMidnight } from './pro-mcp-token';
+import { isSelfHost } from './self-host';
 
 export const DIRECT_LLM_DAILY_QUOTA_LIMIT = 50;
 export const DIRECT_LLM_REDIS_UNAVAILABLE_RETRY_AFTER_SECONDS = 30;
@@ -48,6 +49,10 @@ export async function reserveDirectLlmQuota(opts: {
   pipeline: DirectLlmQuotaPipeline;
   date?: Date;
 }): Promise<DirectLlmQuotaReservation> {
+  // Self-host bypass: no daily LLM quota (server/_shared/self-host.ts).
+  if (isSelfHost) {
+    return { ok: true, newCount: 0, rollback: async () => {} };
+  }
   const retryAfterSec = secondsUntilUtcMidnight(opts.date);
   const key = directLlmDailyQuotaKey(opts.userId, opts.date);
   if (!key) {

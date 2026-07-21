@@ -62,6 +62,7 @@ import {
   DIRECT_LLM_GATEWAY_QUOTA_PATHS,
   reserveDirectLlmQuota,
 } from './_shared/direct-llm-quota';
+import { isSelfHost } from './_shared/self-host';
 import {
   deliverUsageEvents,
   buildRequestEvent,
@@ -1595,7 +1596,7 @@ export function createDomainGateway(
       }
     }
 
-    if (requiresDirectLlmQuota && !isEnterpriseAuth) {
+    if (requiresDirectLlmQuota && !isEnterpriseAuth && !isSelfHost) {
       if (!sessionUserId) {
         emitRequest(401, 'auth_401', null);
         return createGatewayAuthErrorResponse(401, 'Pro authentication required', corsHeaders);
