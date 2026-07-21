@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-09T00:00:00Z",
-  "note": "Product-managed curated list. Not user-configurable.",
+  "updatedAt": "2026-07-22T00:00:00Z",
+  "note": "Base curated list. For local additions, edit data/telegram-channels.local.json — channels from both files are merged at relay boot.",
   "channels": {
     "full": [
       {
@@ -498,6 +498,24 @@
         "enabled": true,
         "region": "iran",
         "maxMessages": 15
+      },
+      {
+        "handle": "SEPAHCYBERY",
+        "label": "Sepah Cybery",
+        "topic": "cyber",
+        "tier": 1,
+        "enabled": true,
+        "region": "iran",
+        "maxMessages": 20
+      },
+      {
+        "handle": "IT_Fouri",
+        "label": "IT Fouri (Iran Tech)",
+        "topic": "technology",
+        "tier": 2,
+        "enabled": true,
+        "region": "iran",
+        "maxMessages": 20
       },
       {
         "handle": "TimesofIsrael",

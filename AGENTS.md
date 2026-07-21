@@ -243,7 +243,7 @@ Product direction (reprioritized 2026-07-21): keep worldmonitor theater-agnostic
 - [x] **Self-host entitlement bypass** — `WM_SELF_HOST=1` (server) + `VITE_SELF_HOST=1` (build arg → client) short-circuits every Pro/enterprise gate. Patch points: `server/_shared/self-host.ts` (central flag), `entitlement-check.ts:checkEntitlementDetailed`, `premium-check.ts:resolvePremiumCallerIdentity`, `direct-llm-quota.ts:reserveDirectLlmQuota`, `gateway.ts` direct-LLM block, `src/services/widget-store.ts:isProUser`, `src/services/entitlements.ts:{isEntitled,hasFeature,hasTier}`. Hosted deploys unaffected (flag defaults falsy).
 - [x] **Local settings persistence (no forced sign-in)** — `src/services/local-secret-store.ts` provides an obfuscated localStorage vault for self-host web. `runtime-config.ts:setSecretValue()` now writes to it when `isSelfHost && !isDesktopRuntime()`. The API Keys tab in Settings (`UnifiedSettings.ts:renderSelfHostApiKeys`) shows per-feature key inputs grouped by category with "Get key" links, save button, and live status — no "Sign in" wall. The `RuntimeConfigPanel` dashboard panel is loaded for self-host and its inputs are enabled. Keys persist across sessions. Desktop OS-keyring path unchanged.
 - [ ] **Genericize LiveUAMap parser** — rename `scripts/lib/iran-events-parser.mjs` → `liveuamap-parser.mjs`; lift `LOCATION_COORDS` + `LOCATION_COUNTRY` (`iran-events-parser.mjs:10-213`) into `data/liveuamap-regions/<region>.json` loaded by country code. The dump shape + `CATEGORY_MAP` + severity regexes are already region-agnostic (LiveUAMap uses the same `cat1…cat11` codes for every country map). Genericize before adding Ukraine / Taiwan / Israel-Iran theaters so each new theater is JSON-only.
-- [ ] **Telegram channel list bootstrap** — operator-provided channel list → `data/telegram-channels.json` (format unchanged per `:1-15` operator comment: handle/label/topic/tier/enabled/region/maxMessages). Run `scripts/telegram/session-auth.mjs` to mint `TELEGRAM_SESSION`; set `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION`, `TELEGRAM_CHANNEL_SET=full` on the relay container. Relay load path is already wired at `scripts/ais-relay.cjs:811-843`. Note the file is product-managed (data file says "Not user-configurable"); for self-host override, the fork can drop that comment and ship a `data/telegram-channels.local.json` override loader.
+- [x] **Telegram channel list bootstrap** — added @SEPAHCYBERY + @IT_Fouri (Persian cyber/tech channels) to `data/telegram-channels.json`. Created `data/telegram-channels.local.json` override template (tracked, edit for personal channels). Relay’s `loadTelegramChannels()` now merges base + local files; a docker-compose volume mount lets you edit local channels without rebuilding. Note field changed from "Not user-configurable" to "Base curated list." To go live: run `scripts/telegram/session-auth.mjs` to mint `TELEGRAM_SESSION`, set `TELEGRAM_API_ID` + `TELEGRAM_API_HASH` + `TELEGRAM_SESSION`, and set `TELEGRAM_CHANNEL_SET=full` on the relay. Follow-up: Settings UI for channel management, YouTube ingestion (@judgingfreedom @Tahlilgarsiasi).
 
 ### Tier 1 — Persian sources + AI briefings (high signal, low cost)
 
@@ -282,6 +282,8 @@ Server-side entitlement map at `server/_shared/entitlement-check.ts:ENDPOINT_ENT
 - [ ] Regional proxy-network actor map using ACLED actor-level attribution (generic — any axis / coalition).
 - [ ] Connectivity kill-switch detection (IODA / Cloudflare Radar outage APIs) feeding CII's Information component.
 - [ ] Black-market FX tracker (Rial or otherwise) as regime-stress leading indicator — region-parameterized.
+- [ ] **YouTube geopolitical ingestion** — ingest captions/transcripts from YouTube channels with geopolitical analysis and interpretations (e.g., @judgingfreedom, @Tahlilgarsiasi). The repo already has `youtubei.js` as a dependency and `api/youtube/embed.ts`. Pattern: follow the Telegram relay pipeline — curated `data/youtube-channels.json` (handle, label, topic, tier, region, maxVideos) → relay poller → Redis → front-end panel. Needs a new seed/poller script in `scripts/` and relay cron.
+- [ ] **Telegram channel UI management** — add/remove channels from the Settings modal instead of editing `data/telegram-channels.local.json` by hand. Writes to Redis or a relay HTTP endpoint; the relay reads the updated channel list at the next poll cycle.
 
 ### Out of scope / deprioritized
 
@@ -304,6 +306,13 @@ Server-side entitlement map at `server/_shared/entitlement-check.ts:ENDPOINT_ENT
 - Yahoo Finance requests must be staggered (150ms delays)
 - New data sources MUST have bootstrap hydration wired in `api/bootstrap.js`
 - Redis seed scripts MUST write `seed-meta:<key>` for health monitoring
+
+## Testing & Refactoring Conventions (learned from PR #5 review)
+
+- **Don't hand-copy logic into tests.** If a function lives in a side-effectful monolith (e.g. `scripts/ais-relay.cjs`, 11k+ lines, no `module.exports`, starts a server on `require()`), extract the pure logic into `scripts/lib/<name>.cjs` following the existing pattern (`usni-fleet-parser.cjs`, `iran-events-parser.mjs`, `telegram-channel-merge.cjs`). Then test the *imported* module — a duplicated copy drifts and gives false-green tests.
+- **Preserve error-reporting state on refactor.** When refactoring a `load*()` function, keep any `lastError` / state-mutation it previously did for the `/status` or health endpoint. My initial merge refactor silently dropped `telegramState.lastError` — a corrupted base file would degrade to zero channels with no diagnostic. The error must surface (base file = required, ENOENT = error; local override = optional, ENOENT = silent; a present-but-broken file = error either way).
+- **Use `e.code === 'ENOENT'`, not `e.message?.includes('no such file')`.** Node sets a structured `code` on filesystem errors; string-matching the message is locale-fragile and broke in some environments.
+- **New `scripts/lib/*.cjs` files need a `COPY` line in `Dockerfile.relay`.** The file isn't auto-included by the `COPY scripts/ais-relay.cjs` line — it's an explicit per-file COPY list, guarded by `tests/dockerfile-relay-imports.test.mjs` (transitive-closure check). Run that test after adding any new `scripts/lib/` import.
 
 ## External References
 

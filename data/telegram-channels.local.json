@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updatedAt": "2026-07-22T00:00:00Z",
+  "note": "Local channel overrides — merged with telegram-channels.json at relay boot. Channels here supplement the base list for your self-hosted instance. Same format as telegram-channels.json: handle, label, topic, tier, enabled, region, maxMessages.",
+  "channels": {
+    "full": [],
+    "tech": [],
+    "finance": []
+  }
+}
