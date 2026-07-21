@@ -1,5 +1,7 @@
 import { getApiBaseUrl, isDesktopRuntime } from './runtime';
 import { invokeTauri } from './tauri-bridge';
+import { isSelfHost } from './self-host';
+import { saveLocalSecret, deleteLocalSecret, loadAllLocalSecrets } from './local-secret-store';
 
 export type RuntimeSecretKey =
   | 'GROQ_API_KEY'
@@ -391,16 +393,32 @@ function seedSecretsFromEnvironment(): void {
       runtimeConfig.secrets[key] = { value, source: 'env' };
     }
   }
+
+  // Self-host web: also seed from localStorage vault
+  if (isSelfHost) {
+    const localSecrets = loadAllLocalSecrets();
+    for (const [key, value] of Object.entries(localSecrets)) {
+      const typedKey = key as RuntimeSecretKey;
+      if (!runtimeConfig.secrets[typedKey]) {
+        runtimeConfig.secrets[typedKey] = { value, source: 'vault' };
+      }
+    }
+  }
 }
 
 seedSecretsFromEnvironment();
+loadSelfHostSecrets();
 
 // Listen for cross-window state updates (settings ↔ main).
 // When one window saves secrets or toggles features, the `storage` event fires in other same-origin windows.
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key === 'wm-secrets-updated') {
-      void loadDesktopSecrets();
+      if (isDesktopRuntime()) {
+        void loadDesktopSecrets();
+      } else if (isSelfHost) {
+        void loadSelfHostSecrets();
+      }
     } else if (e.key === TOGGLES_STORAGE_KEY && e.newValue) {
       try {
         const parsed = JSON.parse(e.newValue) as Partial<Record<RuntimeFeatureId, boolean>>;
@@ -459,8 +477,22 @@ export function setFeatureToggle(featureId: RuntimeFeatureId, enabled: boolean):
 }
 
 export async function setSecretValue(key: RuntimeSecretKey, value: string): Promise<void> {
-  if (!isDesktopRuntime()) {
+  if (!isDesktopRuntime() && !isSelfHost) {
     console.warn('[runtime-config] Ignoring secret write outside desktop runtime');
+    return;
+  }
+
+  // Self-host web: persist to localStorage (no Tauri keyring available)
+  if (!isDesktopRuntime() && isSelfHost) {
+    const sanitized = value.trim();
+    if (sanitized) {
+      saveLocalSecret(key, sanitized);
+      runtimeConfig.secrets[key] = { value: sanitized, source: 'vault' };
+    } else {
+      deleteLocalSecret(key);
+      delete runtimeConfig.secrets[key];
+    }
+    notifyConfigChanged();
     return;
   }
 
@@ -639,4 +671,28 @@ async function pushSecretBatchToSidecar(entries: { key: string; value: string }[
   if (!response.ok) {
     throw new Error(`Batch env update failed (${response.status})`);
   }
+}
+
+/**
+ * Load secrets from localStorage vault for self-host web mode.
+ * Parallel to loadDesktopSecrets() which reads from the OS keyring on Tauri.
+ * Called on init and on cross-window storage events.
+ */
+export function loadSelfHostSecrets(): void {
+  if (isDesktopRuntime() || !isSelfHost) return;
+
+  const localSecrets = loadAllLocalSecrets();
+  let changed = false;
+  for (const [key, value] of Object.entries(localSecrets)) {
+    const typedKey = key as RuntimeSecretKey;
+    if (value && value.trim().length > 0) {
+      runtimeConfig.secrets[typedKey] = { value, source: 'vault' };
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    notifyConfigChanged();
+  }
+  secretsReadyResolve();
 }
