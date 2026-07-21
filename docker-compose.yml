@@ -80,6 +80,11 @@ services:
       UPSTASH_ALLOW_INSECURE_HTTP: "true"
       UCDP_ACCESS_TOKEN: "${UCDP_ACCESS_TOKEN:-}"
       PORT: "3004"
+    volumes:
+      # Mount the local channel override so you can add Telegram channels
+      # without rebuilding the image. Edit data/telegram-channels.local.json
+      # on your host and restart the relay (`docker compose restart ais-relay`).
+      - ./data/telegram-channels.local.json:/app/data/telegram-channels.local.json:ro
     depends_on:
       redis-rest:
         condition: service_started

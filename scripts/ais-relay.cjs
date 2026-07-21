@@ -809,17 +809,28 @@ const orefState = {
 };
 
 function loadTelegramChannels() {
-  // Product-managed curated list lives in repo root under data/ (shared by web + desktop).
-  // Relay is executed from scripts/, so resolve ../data.
-  const p = path.join(__dirname, '..', 'data', 'telegram-channels.json');
   const set = String(process.env.TELEGRAM_CHANNEL_SET || 'full').toLowerCase();
+  const p = path.join(__dirname, '..', 'data', 'telegram-channels.json');
+  const localPath = path.join(__dirname, '..', 'data', 'telegram-channels.local.json');
+
+  const baseChannels = readChannelFile(p, set);
+  const localChannels = readChannelFile(localPath, set);
+
+  const merged = mergeChannels(baseChannels, localChannels);
+  telegramState.channels = merged;
+  if (!telegramState.channels.length) {
+    console.warn(`[Relay] Telegram channel set "${set}" is empty — no channels to poll`);
+  }
+  return telegramState.channels;
+}
+
+function readChannelFile(filePath, set) {
   try {
-    const raw = JSON.parse(readFileSync(p, 'utf8'));
+    const raw = JSON.parse(readFileSync(filePath, 'utf8'));
     const bucket = raw?.channels?.[set];
     const channels = Array.isArray(bucket) ? bucket : [];
-
-    telegramState.channels = channels
-      .filter(c => c && typeof c.handle === 'string' && c.handle.length > 1)
+    return channels
+      .filter(c => c && typeof c.handle === 'string' && c.handle.length > 1 && c.enabled !== false)
       .map(c => ({
         handle: String(c.handle).replace(/^@/, ''),
         label: c.label ? String(c.label) : undefined,
@@ -828,19 +839,21 @@ function loadTelegramChannels() {
         tier: c.tier != null ? Number(c.tier) : undefined,
         enabled: c.enabled !== false,
         maxMessages: c.maxMessages != null ? Number(c.maxMessages) : undefined,
-      }))
-      .filter(c => c.enabled);
-
-    if (!telegramState.channels.length) {
-      console.warn(`[Relay] Telegram channel set "${set}" is empty — no channels to poll`);
-    }
-
-    return telegramState.channels;
+      }));
   } catch (e) {
-    telegramState.channels = [];
-    telegramState.lastError = `failed to load telegram-channels.json: ${e?.message || String(e)}`;
+    if (!e.message?.includes('ENOENT') && !e.message?.includes('no such file')) {
+      console.warn(`[Relay] Failed to load telegram channels from ${filePath}: ${e.message || String(e)}`);
+    }
     return [];
   }
+}
+
+function mergeChannels(base, local) {
+  if (!local.length) return base;
+  const merged = new Map();
+  for (const c of base) merged.set(c.handle, c);
+  for (const c of local) merged.set(c.handle, c);
+  return Array.from(merged.values());
 }
 
 function normalizeTelegramMessage(msg, channel) {
