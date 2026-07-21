@@ -35,7 +35,7 @@ import {
 } from '@/services/api-plan-limit-notices';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 import { isSelfHost } from '@/services/self-host';
-import { getSecretState, type RuntimeSecretKey } from '@/services/runtime-config';
+import { getSecretState, getRuntimeConfigSnapshot, type RuntimeSecretKey } from '@/services/runtime-config';
 import { RUNTIME_FEATURES, getEffectiveSecrets } from '@/services/runtime-config';
 import { SETTINGS_CATEGORIES, HUMAN_LABELS, SIGNUP_URLS, PLAINTEXT_KEYS } from '@/services/settings-constants';
 
@@ -1182,7 +1182,7 @@ export class UnifiedSettings {
                 <div class="runtime-secret-key"><code>${escapeHtml(label)}</code></div>
                 <span class="runtime-secret-status ${statusClass}">${escapeHtml(statusText)}</span>
                 <div class="runtime-input-wrapper${signupUrl ? ' has-suffix' : ''}">
-                  <input type="${isPlaintext ? 'text' : 'password'}" data-self-host-secret="${escapeHtml(key)}" placeholder="${state.present ? '•••••• (saved)' : 'Enter key…'}" autocomplete="off" class="runtime-secret-input" ${state.present && !isPlaintext ? 'value=""' : ''}>
+                  <input type="${isPlaintext ? 'text' : 'password'}" data-self-host-secret="${escapeHtml(key)}" placeholder="${state.present ? '•••••• (saved)' : 'Enter key…'}" autocomplete="off" class="runtime-secret-input" ${isPlaintext && state.present ? `value="${escapeHtml(getRuntimeConfigSnapshot().secrets[key]?.value || '')}"` : (state.present ? 'value=""' : '')}>
                   ${getKeyLink}
                 </div>
               </div>`;

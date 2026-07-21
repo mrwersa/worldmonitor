@@ -3,31 +3,40 @@
  *
  * Desktop builds use the OS keyring via Tauri (`invokeTauri('set_secret', …)`).
  * For self-hosted web (no Tauri, no Clerk), secrets are persisted to localStorage
- * with lightweight obfuscation (base64 + XOR with a session key). This is NOT
- * cryptographically secure — localStorage is accessible to any XSS — but it
- * prevents casual plaintext exposure in devtools and is the same trust model
- * as the existing `'env'` source (server env vars are also visible to anyone
- * with process access).
+ * with lightweight obfuscation (base64 + XOR with a per-browser obfuscation
+ * key). This is NOT cryptographically secure — localStorage is accessible to
+ * any XSS — but it prevents casual plaintext exposure in devtools and is the
+ * same trust model as the existing `'env'` source (server env vars are also
+ * visible to anyone with process access).
+ *
+ * The obfuscation key is stored in localStorage (not sessionStorage): it
+ * must outlive the browser session and be identical across every same-origin
+ * tab, since the encoded secrets it protects live in localStorage, which is
+ * both durable and shared across tabs. Keying it to sessionStorage instead
+ * (each tab/session gets its own random key) would silently corrupt every
+ * saved secret the moment the tab closes and reopens, or the moment a second
+ * tab reads a value written by the first — exactly the case the cross-window
+ * `storage` event listener in runtime-config.ts is meant to handle.
  *
  * The storage namespace is `wm-local-secrets:` to avoid collisions with other
  * localStorage keys used by the app.
  */
 
 const STORAGE_PREFIX = 'wm-local-secrets:';
-const SESSION_KEY_STORAGE = 'wm-local-secrets-key';
+const OBFUSCATION_KEY_STORAGE = 'wm-local-secrets-key';
 
-function generateSessionKey(): string {
+function generateObfuscationKey(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function getSessionKey(): string {
+function getObfuscationKey(): string {
   try {
-    let key = sessionStorage.getItem(SESSION_KEY_STORAGE);
+    let key = localStorage.getItem(OBFUSCATION_KEY_STORAGE);
     if (key) return key;
-    key = generateSessionKey();
-    sessionStorage.setItem(SESSION_KEY_STORAGE, key);
+    key = generateObfuscationKey();
+    localStorage.setItem(OBFUSCATION_KEY_STORAGE, key);
     return key;
   } catch {
     return '';
@@ -44,14 +53,14 @@ function xorTransform(input: string, key: string): string {
 }
 
 function encode(value: string): string {
-  const key = getSessionKey();
+  const key = getObfuscationKey();
   if (!key) return btoa(value);
   return btoa(xorTransform(value, key));
 }
 
 function decode(stored: string): string {
   try {
-    const key = getSessionKey();
+    const key = getObfuscationKey();
     const decoded = atob(stored);
     if (!key) return decoded;
     return xorTransform(decoded, key);

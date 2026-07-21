@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const LS_PREFIX = 'wm-local-secrets:';
-const SESSION_KEY_STORAGE = 'wm-local-secrets-key';
 
 function setupMockStorage(): void {
   const store = new Map<string, string>();
@@ -79,6 +78,45 @@ test('local-secret-store: loadAllLocalSecrets only returns wm-prefixed keys', as
   const all = loadAllLocalSecrets();
   assert.equal(Object.keys(all).length, 1);
   assert.equal(all['GROQ_API_KEY'], 'gsk_abc');
+});
+
+test('local-secret-store: secret survives sessionStorage being cleared (browser restart / new tab)', async () => {
+  setupMockStorage();
+  const { saveLocalSecret, loadAllLocalSecrets } = await import('../src/services/local-secret-store.ts');
+
+  saveLocalSecret('GROQ_API_KEY', 'gsk_test_12345');
+  assert.equal(loadAllLocalSecrets()['GROQ_API_KEY'], 'gsk_test_12345', 'sanity: reads back within the same session');
+
+  // The obfuscation key must live in localStorage, not sessionStorage: it has
+  // to outlive the browser session and be identical across every same-origin
+  // tab, since the encoded secrets it protects are themselves in localStorage
+  // (durable, cross-tab). Simulate a browser restart / brand-new tab, where
+  // sessionStorage is empty but localStorage — including whatever the
+  // obfuscation key is keyed on — persists.
+  const freshSessionStore = new Map<string, string>();
+  (globalThis as Record<string, unknown>).sessionStorage = {
+    getItem: (k: string) => freshSessionStore.get(k) ?? null,
+    setItem: (k: string, v: string) => { freshSessionStore.set(k, v); },
+    removeItem: (k: string) => { freshSessionStore.delete(k); },
+    clear: () => { freshSessionStore.clear(); },
+    key: (i: number) => Array.from(freshSessionStore.keys())[i] ?? null,
+    get length() { return freshSessionStore.size; },
+  } as Storage;
+
+  assert.equal(
+    loadAllLocalSecrets()['GROQ_API_KEY'],
+    'gsk_test_12345',
+    'secret must still decode correctly with a fresh sessionStorage — a sessionStorage-keyed obfuscation key would silently corrupt this',
+  );
+});
+
+test('local-secret-store: obfuscation key does not leak into loadAllLocalSecrets output', async () => {
+  setupMockStorage();
+  const { saveLocalSecret, loadAllLocalSecrets } = await import('../src/services/local-secret-store.ts');
+
+  saveLocalSecret('GROQ_API_KEY', 'gsk_test_12345');
+  const all = loadAllLocalSecrets();
+  assert.equal(Object.keys(all).length, 1, 'only the actual secret should be returned, not the obfuscation key entry');
 });
 
 test('local-secret-store: handles missing localStorage gracefully', async () => {
