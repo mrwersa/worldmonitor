@@ -235,6 +235,8 @@ Product direction (reprioritized 2026-07-21): keep worldmonitor theater-agnostic
 
 **Every item ships as its own PR.** One roadmap bullet = one branch = one PR (see Shipping Velocity above for the push/PR workflow and merge-authority rule — opening a PR is fine on request, merging still needs explicit approval in that conversation). Don't bundle multiple bullets into one PR; it makes concurrent-agent collisions and review harder to reason about.
 
+**Always design for the best UX, not just the shortest technical path.** For every item on this list: think about the operator-facing experience (loading/empty/error states, how a feature is discovered, what happens when a dependency is missing or misconfigured, copy that explains what's happening) before shipping the backend plumbing alone. A correct API with no thought given to how a human encounters it is an unfinished item, not a done one.
+
 ### Tier 0 — Self-host personalization (do first, unblocks everything)
 
 - [x] Iran domain reactivated (PR #1 merged): country-attributed events publish `conflict_escalation` via `wm:events:queue` so Alert Rules fire. **To go live**: set `IRAN_EVENTS_ENABLED=true` + `VITE_ENABLE_IRAN_ATTACKS=true` in your deployment env.

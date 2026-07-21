@@ -271,7 +271,7 @@ export async function checkEntitlementDetailed(
 
   // Self-host bypass: skip Clerk/Convex/Dodo entirely (server/_shared/self-host.ts).
   if (isSelfHost) {
-    return { response: null, entitlements: SELF_HOST_ENTITLEMENT as unknown as CachedEntitlements };
+    return { response: null, entitlements: SELF_HOST_ENTITLEMENT };
   }
 
   if (!userId) {

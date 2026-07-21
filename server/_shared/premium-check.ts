@@ -24,7 +24,7 @@ export type PremiumCallerIdentity =
 export async function resolvePremiumCallerIdentity(request: Request): Promise<PremiumCallerIdentity> {
   // Self-host bypass: all callers are premium (server/_shared/self-host.ts).
   if (isSelfHost) {
-    return SELF_HOST_PREMIUM_IDENTITY as unknown as PremiumCallerIdentity;
+    return SELF_HOST_PREMIUM_IDENTITY;
   }
 
   // Internal-MCP context: trusted markers are set by the gateway AFTER an
