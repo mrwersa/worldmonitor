@@ -1,0 +1,773 @@
+{
+  "version": 1,
+  "regionCode": "IR",
+  "name": "Iran and regional spillover",
+  "defaultLocation": {
+    "lat": 32.4279,
+    "lon": 53.688,
+    "locationName": "Iran",
+    "country": "IR"
+  },
+  "locations": {
+    "tehran": {
+      "lat": 35.6892,
+      "lon": 51.389,
+      "country": "IR"
+    },
+    "isfahan": {
+      "lat": 32.6546,
+      "lon": 51.668,
+      "country": "IR"
+    },
+    "shiraz": {
+      "lat": 29.5918,
+      "lon": 52.5837,
+      "country": "IR"
+    },
+    "mashhad": {
+      "lat": 36.2605,
+      "lon": 59.6168,
+      "country": "IR"
+    },
+    "tabriz": {
+      "lat": 38.08,
+      "lon": 46.2919,
+      "country": "IR"
+    },
+    "ahvaz": {
+      "lat": 31.3183,
+      "lon": 48.6706,
+      "country": "IR"
+    },
+    "kermanshah": {
+      "lat": 34.3142,
+      "lon": 47.065,
+      "country": "IR"
+    },
+    "urmia": {
+      "lat": 37.5527,
+      "lon": 45.0761,
+      "country": "IR"
+    },
+    "bushehr": {
+      "lat": 28.9234,
+      "lon": 50.8203,
+      "country": "IR"
+    },
+    "bandar abbas": {
+      "lat": 27.1865,
+      "lon": 56.2808,
+      "country": "IR"
+    },
+    "erbil": {
+      "lat": 36.1912,
+      "lon": 44.0119,
+      "country": "IQ"
+    },
+    "baghdad": {
+      "lat": 33.3152,
+      "lon": 44.3661,
+      "country": "IQ"
+    },
+    "basra": {
+      "lat": 30.5085,
+      "lon": 47.7804,
+      "country": "IQ"
+    },
+    "mosul": {
+      "lat": 36.335,
+      "lon": 43.1189,
+      "country": "IQ"
+    },
+    "tel aviv": {
+      "lat": 32.0853,
+      "lon": 34.7818,
+      "country": "IL"
+    },
+    "israel": {
+      "lat": 31.7683,
+      "lon": 35.2137,
+      "country": "IL"
+    },
+    "negev": {
+      "lat": 30.8,
+      "lon": 34.8,
+      "country": "IL"
+    },
+    "manama": {
+      "lat": 26.2285,
+      "lon": 50.586,
+      "country": "BH"
+    },
+    "bahrain": {
+      "lat": 26.0667,
+      "lon": 50.5577,
+      "country": "BH"
+    },
+    "kuwait": {
+      "lat": 29.3759,
+      "lon": 47.9774,
+      "country": "KW"
+    },
+    "dubai": {
+      "lat": 25.2048,
+      "lon": 55.2708,
+      "country": "AE"
+    },
+    "abu dhabi": {
+      "lat": 24.4539,
+      "lon": 54.3773,
+      "country": "AE"
+    },
+    "fujairah": {
+      "lat": 25.1288,
+      "lon": 56.3265,
+      "country": "AE"
+    },
+    "qatar": {
+      "lat": 25.2854,
+      "lon": 51.531,
+      "country": "QA"
+    },
+    "doha": {
+      "lat": 25.2854,
+      "lon": 51.531,
+      "country": "QA"
+    },
+    "jordan": {
+      "lat": 31.9454,
+      "lon": 35.9284,
+      "country": "JO"
+    },
+    "irbid": {
+      "lat": 32.556,
+      "lon": 35.85,
+      "country": "JO"
+    },
+    "syria": {
+      "lat": 34.8021,
+      "lon": 38.9968,
+      "country": "SY"
+    },
+    "daraa": {
+      "lat": 32.6189,
+      "lon": 36.1021,
+      "country": "SY"
+    },
+    "cyprus": {
+      "lat": 34.7071,
+      "lon": 33.0226,
+      "country": "CY"
+    },
+    "akrotiri": {
+      "lat": 34.5839,
+      "lon": 32.9879,
+      "country": "CY"
+    },
+    "hormuz": {
+      "lat": 27,
+      "lon": 56.5,
+      "country": null
+    },
+    "strait of hormuz": {
+      "lat": 26.5,
+      "lon": 56.3,
+      "country": null
+    },
+    "parchin": {
+      "lat": 35.5167,
+      "lon": 51.7667,
+      "country": "IR"
+    },
+    "mehrabad": {
+      "lat": 35.6892,
+      "lon": 51.3134,
+      "country": "IR"
+    },
+    "paveh": {
+      "lat": 35.0442,
+      "lon": 46.3558,
+      "country": "IR"
+    },
+    "poldokhtar": {
+      "lat": 33.1517,
+      "lon": 47.7133,
+      "country": "IR"
+    },
+    "azadi": {
+      "lat": 35.6997,
+      "lon": 51.338,
+      "country": "IR"
+    },
+    "kohak": {
+      "lat": 35.6,
+      "lon": 51.5,
+      "country": "IR"
+    },
+    "zibashir": {
+      "lat": 29.55,
+      "lon": 52.55,
+      "country": "IR"
+    },
+    "jam": {
+      "lat": 27.82,
+      "lon": 52.35,
+      "country": "IR"
+    },
+    "london": {
+      "lat": 51.5074,
+      "lon": -0.1278,
+      "country": "GB"
+    },
+    "azerbaijan": {
+      "lat": 40.4093,
+      "lon": 49.8671,
+      "country": "AZ"
+    },
+    "baku": {
+      "lat": 40.4093,
+      "lon": 49.8671,
+      "country": "AZ"
+    },
+    "gibraltar": {
+      "lat": 36.1408,
+      "lon": -5.3536,
+      "country": "GI"
+    },
+    "iran": {
+      "lat": 32.4279,
+      "lon": 53.688,
+      "country": "IR"
+    },
+    "iraq": {
+      "lat": 33.2232,
+      "lon": 43.6793,
+      "country": "IQ"
+    },
+    "saudi": {
+      "lat": 24.7136,
+      "lon": 46.6753,
+      "country": "SA"
+    },
+    "uae": {
+      "lat": 24.4539,
+      "lon": 54.3773,
+      "country": "AE"
+    },
+    "al udeid": {
+      "lat": 25.1173,
+      "lon": 51.315,
+      "country": "QA"
+    },
+    "jomhouri": {
+      "lat": 35.685,
+      "lon": 51.405,
+      "country": "IR"
+    },
+    "jurf al-sakhar": {
+      "lat": 32.95,
+      "lon": 44.1,
+      "country": "IQ"
+    },
+    "haji omeran": {
+      "lat": 36.65,
+      "lon": 45.05,
+      "country": "IQ"
+    },
+    "nineveh": {
+      "lat": 36.35,
+      "lon": 43.15,
+      "country": "IQ"
+    },
+    "rashidiya": {
+      "lat": 36.4,
+      "lon": 43.1,
+      "country": "IQ"
+    },
+    "gaza": {
+      "lat": 31.3547,
+      "lon": 34.3088,
+      "country": "PS"
+    },
+    "riyadh": {
+      "lat": 24.7136,
+      "lon": 46.6753,
+      "country": "SA"
+    },
+    "sulaimaniyah": {
+      "lat": 35.5613,
+      "lon": 45.4306,
+      "country": "IQ"
+    },
+    "sulaimani": {
+      "lat": 35.5613,
+      "lon": 45.4306,
+      "country": "IQ"
+    },
+    "haifa": {
+      "lat": 32.794,
+      "lon": 34.9896,
+      "country": "IL"
+    },
+    "karaj": {
+      "lat": 35.84,
+      "lon": 50.9391,
+      "country": "IR"
+    },
+    "shahran": {
+      "lat": 35.79,
+      "lon": 51.29,
+      "country": "IR"
+    },
+    "kouhak": {
+      "lat": 35.62,
+      "lon": 51.48,
+      "country": "IR"
+    },
+    "hamadan": {
+      "lat": 34.7988,
+      "lon": 48.5146,
+      "country": "IR"
+    },
+    "hamedan": {
+      "lat": 34.7988,
+      "lon": 48.5146,
+      "country": "IR"
+    },
+    "yazd": {
+      "lat": 31.8974,
+      "lon": 54.3569,
+      "country": "IR"
+    },
+    "kish": {
+      "lat": 26.54,
+      "lon": 53.98,
+      "country": "IR"
+    },
+    "qazvin": {
+      "lat": 36.2688,
+      "lon": 50.0041,
+      "country": "IR"
+    },
+    "najafabad": {
+      "lat": 32.634,
+      "lon": 51.367,
+      "country": "IR"
+    },
+    "malayer": {
+      "lat": 34.2968,
+      "lon": 48.8234,
+      "country": "IR"
+    },
+    "mehran": {
+      "lat": 33.1222,
+      "lon": 46.1646,
+      "country": "IR"
+    },
+    "aqaba": {
+      "lat": 29.5267,
+      "lon": 35.0078,
+      "country": "JO"
+    },
+    "eilat": {
+      "lat": 29.5577,
+      "lon": 34.9519,
+      "country": "IL"
+    },
+    "choman": {
+      "lat": 36.6269,
+      "lon": 44.8856,
+      "country": "IQ"
+    },
+    "baqer shahr": {
+      "lat": 35.54,
+      "lon": 51.39,
+      "country": "IR"
+    },
+    "jubail": {
+      "lat": 27.0046,
+      "lon": 49.6225,
+      "country": "SA"
+    },
+    "shaybah": {
+      "lat": 22.52,
+      "lon": 54,
+      "country": "SA"
+    },
+    "al dhafra": {
+      "lat": 24.25,
+      "lon": 54.55,
+      "country": "AE"
+    },
+    "juffair": {
+      "lat": 26.2167,
+      "lon": 50.6,
+      "country": "BH"
+    },
+    "qeshm": {
+      "lat": 26.95,
+      "lon": 56.27,
+      "country": "IR"
+    },
+    "pakdasht": {
+      "lat": 35.4747,
+      "lon": 51.6856,
+      "country": "IR"
+    },
+    "tasluja": {
+      "lat": 35.51,
+      "lon": 45.37,
+      "country": "IQ"
+    },
+    "al-kharj": {
+      "lat": 24.15,
+      "lon": 47.31,
+      "country": "SA"
+    },
+    "petah tikva": {
+      "lat": 32.0841,
+      "lon": 34.8878,
+      "country": "IL"
+    },
+    "beersheba": {
+      "lat": 31.2518,
+      "lon": 34.7913,
+      "country": "IL"
+    },
+    "oman": {
+      "lat": 23.588,
+      "lon": 58.3829,
+      "country": "OM"
+    },
+    "oslo": {
+      "lat": 59.9139,
+      "lon": 10.7522,
+      "country": "NO"
+    },
+    "norway": {
+      "lat": 59.9139,
+      "lon": 10.7522,
+      "country": "NO"
+    },
+    "aghdasiyeh": {
+      "lat": 35.79,
+      "lon": 51.45,
+      "country": "IR"
+    },
+    "rey": {
+      "lat": 35.5959,
+      "lon": 51.435,
+      "country": "IR"
+    },
+    "beirut": {
+      "lat": 33.8938,
+      "lon": 35.5018,
+      "country": "LB"
+    },
+    "azraq": {
+      "lat": 31.83,
+      "lon": 36.83,
+      "country": "JO"
+    },
+    "yehud": {
+      "lat": 32.0333,
+      "lon": 34.8833,
+      "country": "IL"
+    },
+    "sitra": {
+      "lat": 26.1547,
+      "lon": 50.6028,
+      "country": "BH"
+    },
+    "sanandaj": {
+      "lat": 35.3219,
+      "lon": 46.9862,
+      "country": "IR"
+    },
+    "ma'ameer": {
+      "lat": 26.05,
+      "lon": 50.52,
+      "country": "BH"
+    },
+    "northern cyprus": {
+      "lat": 35.1856,
+      "lon": 33.3823,
+      "country": "CY"
+    },
+    "borujerd": {
+      "lat": 33.8973,
+      "lon": 48.7516,
+      "country": "IR"
+    },
+    "lamerd": {
+      "lat": 27.3373,
+      "lon": 53.1831,
+      "country": "IR"
+    },
+    "chabahar": {
+      "lat": 25.2919,
+      "lon": 60.643,
+      "country": "IR"
+    },
+    "shahrekord": {
+      "lat": 32.3256,
+      "lon": 50.8644,
+      "country": "IR"
+    },
+    "parand": {
+      "lat": 35.487,
+      "lon": 51.005,
+      "country": "IR"
+    },
+    "rabat karim": {
+      "lat": 35.47,
+      "lon": 51.07,
+      "country": "IR"
+    },
+    "shahriar": {
+      "lat": 35.6569,
+      "lon": 51.0592,
+      "country": "IR"
+    },
+    "punak": {
+      "lat": 35.76,
+      "lon": 51.36,
+      "country": "IR"
+    },
+    "bonab": {
+      "lat": 37.3404,
+      "lon": 46.0561,
+      "country": "IR"
+    },
+    "ghaniabad": {
+      "lat": 35.45,
+      "lon": 51.65,
+      "country": "IR"
+    },
+    "beit shemesh": {
+      "lat": 31.7469,
+      "lon": 34.9876,
+      "country": "IL"
+    },
+    "bnei brak": {
+      "lat": 32.0833,
+      "lon": 34.8333,
+      "country": "IL"
+    },
+    "quneitra": {
+      "lat": 33.126,
+      "lon": 35.824,
+      "country": "SY"
+    },
+    "khan arnabeh": {
+      "lat": 33.145,
+      "lon": 35.86,
+      "country": "SY"
+    },
+    "ruwais": {
+      "lat": 24.11,
+      "lon": 52.73,
+      "country": "AE"
+    },
+    "mehrshahr": {
+      "lat": 35.83,
+      "lon": 50.97,
+      "country": "IR"
+    },
+    "qaim": {
+      "lat": 34.38,
+      "lon": 41.04,
+      "country": "IQ"
+    },
+    "prince sultan": {
+      "lat": 24.0625,
+      "lon": 47.5808,
+      "country": "SA"
+    },
+    "ramat david": {
+      "lat": 32.665,
+      "lon": 35.1792,
+      "country": "IL"
+    },
+    "vietnam": {
+      "lat": 14.0583,
+      "lon": 108.2772,
+      "country": "VN"
+    },
+    "south korea": {
+      "lat": 35.9078,
+      "lon": 127.7669,
+      "country": "KR"
+    },
+    "ilam": {
+      "lat": 33.6374,
+      "lon": 46.4227,
+      "country": "IR"
+    },
+    "kerman": {
+      "lat": 30.2839,
+      "lon": 57.0834,
+      "country": "IR"
+    },
+    "lorestan": {
+      "lat": 33.4941,
+      "lon": 48.353,
+      "country": "IR"
+    },
+    "jerusalem": {
+      "lat": 31.7683,
+      "lon": 35.2137,
+      "country": "IL"
+    },
+    "fardis": {
+      "lat": 35.723,
+      "lon": 50.9875,
+      "country": "IR"
+    },
+    "marivan": {
+      "lat": 35.5269,
+      "lon": 46.1761,
+      "country": "IR"
+    },
+    "salalah": {
+      "lat": 17.0151,
+      "lon": 54.0924,
+      "country": "OM"
+    },
+    "palmachim": {
+      "lat": 31.897,
+      "lon": 34.7,
+      "country": "IL"
+    },
+    "umm qasr": {
+      "lat": 30.0362,
+      "lon": 47.9298,
+      "country": "IQ"
+    },
+    "al-siba": {
+      "lat": 29.87,
+      "lon": 48.61,
+      "country": "IQ"
+    },
+    "taleghan": {
+      "lat": 36.17,
+      "lon": 50.76,
+      "country": "IR"
+    },
+    "persian gulf": {
+      "lat": 27,
+      "lon": 51.5,
+      "country": null
+    },
+    "eastern province": {
+      "lat": 26.4207,
+      "lon": 50.0888,
+      "country": "SA"
+    },
+    "empty quarter": {
+      "lat": 22.52,
+      "lon": 54,
+      "country": "SA"
+    },
+    "ovadia": {
+      "lat": 31.47,
+      "lon": 34.53,
+      "country": "IL"
+    },
+    "shin bet": {
+      "lat": 31.7683,
+      "lon": 35.2137,
+      "country": "IL"
+    },
+    "kharg": {
+      "lat": 29.2635,
+      "lon": 50.3273,
+      "country": "IR"
+    },
+    "qom": {
+      "lat": 34.6401,
+      "lon": 50.8764,
+      "country": "IR"
+    },
+    "andisheh": {
+      "lat": 35.705,
+      "lon": 51,
+      "country": "IR"
+    },
+    "ankara": {
+      "lat": 39.9334,
+      "lon": 32.8597,
+      "country": "TR"
+    },
+    "minab": {
+      "lat": 27.1452,
+      "lon": 57.0812,
+      "country": "IR"
+    },
+    "asaluyeh": {
+      "lat": 27.4834,
+      "lon": 52.6121,
+      "country": "IR"
+    },
+    "south pars": {
+      "lat": 27.5,
+      "lon": 52.5,
+      "country": "IR"
+    },
+    "al-ahmadi": {
+      "lat": 29.0769,
+      "lon": 48.0839,
+      "country": "KW"
+    },
+    "mina al-ahmadi": {
+      "lat": 29.0769,
+      "lon": 48.0839,
+      "country": "KW"
+    },
+    "mina abdullah": {
+      "lat": 28.96,
+      "lon": 48.16,
+      "country": "KW"
+    },
+    "kafr qasim": {
+      "lat": 32.1161,
+      "lon": 34.975,
+      "country": "IL"
+    },
+    "taybad": {
+      "lat": 35.1884,
+      "lon": 60.7814,
+      "country": "IR"
+    },
+    "sweihan": {
+      "lat": 24.4041,
+      "lon": 55.3325,
+      "country": "AE"
+    },
+    "mahshahr": {
+      "lat": 30.563,
+      "lon": 49.198,
+      "country": "IR"
+    },
+    "bandar khamir": {
+      "lat": 26.9592,
+      "lon": 55.8981,
+      "country": "IR"
+    },
+    "shalamcheh": {
+      "lat": 30.5244,
+      "lon": 47.9297,
+      "country": "IR"
+    },
+    "ramat gan": {
+      "lat": 32.0704,
+      "lon": 34.8237,
+      "country": "IL"
+    },
+    "shuwaikh": {
+      "lat": 29.3636,
+      "lon": 47.9417,
+      "country": "KW"
+    }
+  }
+}
