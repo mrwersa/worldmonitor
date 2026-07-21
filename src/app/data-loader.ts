@@ -235,8 +235,9 @@ function protoItemToNewsItem(p: ProtoNewsItem): NewsItem {
 }
 
 const CYBER_LAYER_ENABLED = import.meta.env.VITE_ENABLE_CYBER_LAYER === 'true';
-// Iran-events domain sunset (war ended 2026-07). Default OFF: no fetch, even the
-// CII/risk-scoring path. Set VITE_ENABLE_IRAN_ATTACKS=true to restore. Mirrors CYBER_LAYER_ENABLED.
+// Iran-events domain: opt-in steady-state conflict monitor, off by default —
+// no fetch, even the CII/risk-scoring path, while disabled. Set
+// VITE_ENABLE_IRAN_ATTACKS=true to enable. Mirrors CYBER_LAYER_ENABLED.
 const IRAN_ATTACKS_ENABLED = import.meta.env.VITE_ENABLE_IRAN_ATTACKS === 'true';
 
 export interface DataLoaderCallbacks {

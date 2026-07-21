@@ -6,9 +6,9 @@ import type { ConvergenceCard } from '@/services/correlation-engine';
 import { t } from '@/services/i18n';
 import { setTrustedHtml, trustedHtml } from '@/utils/dom-utils';
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF: omit the IRAN
-// EVENTS CSV block. Set VITE_ENABLE_IRAN_ATTACKS=true to restore. Guarded so
-// node:test never dereferences import.meta.env.
+// Iran-events domain: opt-in steady-state conflict monitor, off by default —
+// omit the IRAN EVENTS CSV block while disabled. Set VITE_ENABLE_IRAN_ATTACKS=true
+// to enable. Guarded so node:test never dereferences import.meta.env.
 const IRAN_ATTACKS_ENABLED = typeof window !== 'undefined' && import.meta.env.VITE_ENABLE_IRAN_ATTACKS === 'true';
 
 type ExportFormat = 'json' | 'csv';

@@ -154,9 +154,9 @@ const SEED_DOMAINS = {
   'resilience:recovery:sovereign-wealth': { key: 'seed-meta:resilience:recovery:sovereign-wealth', intervalMin: 43200 }, // monthly bundle cron (30d); intervalMin*2 = 60d matches health.js maxStaleMin
 };
 
-// Iran-events sunset (war ended 2026-07); mirrors api/health.js. Default OFF:
-// drop the deliberately-dormant seed from staleness classification. Set
-// IRAN_EVENTS_ENABLED=true to restore.
+// Iran-events domain: opt-in steady-state conflict monitor, off by default;
+// mirrors api/health.js. Drop the deliberately-dormant seed from staleness
+// classification while disabled. Set IRAN_EVENTS_ENABLED=true to enable.
 if ((process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() !== 'true') {
   delete SEED_DOMAINS['conflict:iran-events'];
 }

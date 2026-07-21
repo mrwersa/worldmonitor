@@ -717,9 +717,10 @@ function emptyAuxiliarySources(): AuxiliarySources {
   };
 }
 
-// Iran-events domain sunset (war ended 2026-07). Default OFF: the strike feed
-// no longer contributes to CII/risk scores. Set IRAN_EVENTS_ENABLED=true to
-// restore. Mirrors the *_ENABLED env idiom in resilience/v1/_shared.ts.
+// Iran-events domain: opt-in steady-state conflict monitor, off by default —
+// the strike feed doesn't contribute to CII/risk scores while disabled. Set
+// IRAN_EVENTS_ENABLED=true to enable. Mirrors the *_ENABLED env idiom in
+// resilience/v1/_shared.ts.
 const IRAN_EVENTS_ENABLED = (process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() === 'true';
 
 async function fetchAuxiliarySources(): Promise<AuxiliarySources> {
