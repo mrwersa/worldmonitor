@@ -110,6 +110,7 @@ async function loadNationalDebtPanel() {
         ANONYMOUS: 'anonymous',
         FREE_TIER: 'free_tier',
       });
+      export function hasPremiumAccess() { return false; }
     `],
     ['checkout-stub', `export function startCheckout() {}`],
     ['products-stub', `export const DEFAULT_UPGRADE_PRODUCT = 'pro';`],

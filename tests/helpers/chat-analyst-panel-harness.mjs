@@ -75,6 +75,7 @@ async function loadChatAnalystPanel() {
         ANONYMOUS: 'anonymous',
         FREE_TIER: 'free_tier',
       });
+      export function hasPremiumAccess() { return false; }
     `],
     ['premium-fetch-stub', `
       export function premiumFetch() { return Promise.reject(new Error('not wired in test')); }
