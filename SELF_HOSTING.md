@@ -199,6 +199,17 @@ docker compose down && docker compose up -d
 ./scripts/run-seeders.sh
 ```
 
+### 🔁 Hot Reload (Dev Mode)
+
+`docker compose up` (above) runs the production image — every code change needs a rebuild. For active development, `docker-compose.dev.yml` adds a `worldmonitor-dev` service that runs the Vite dev server with the repo bind-mounted, so host-side edits apply immediately (HMR for the frontend; no rebuild, no restart):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+  up --build worldmonitor-dev redis redis-rest ais-relay
+```
+
+The app is available at `http://localhost:3000` with hot reload. `--build` is only needed the first time (or after changing `package.json`/`package-lock.json`) — after that, plain `up` reuses the image and picks up file edits live. This is fully additive: it doesn't change anything about the production `docker compose up` path above, and the two can't be run at the same time (`worldmonitor-dev` binds the same host port as `worldmonitor`).
+
 ### ⚠️ Build Notes
 
 - The Docker image uses **Node.js 22 Alpine** for both builder and runtime stages
