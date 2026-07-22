@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import notificationDedup from './shared/notification-dedup.cjs';
-import { geolocate, categorizeSeverity, parseRelativeTime, CATEGORY_MAP } from './lib/iran-events-parser.mjs';
+import { loadRegionConfig, geolocate, categorizeSeverity, parseRelativeTime, CATEGORY_MAP } from './lib/liveuamap-parser.mjs';
 
 const { buildDedupMaterial, classifySetNxResult, recordDedupOutcome } = notificationDedup;
 
@@ -34,6 +34,7 @@ if ((process.env.IRAN_EVENTS_ENABLED ?? 'false').toLowerCase() !== 'true') {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CANONICAL_KEY = 'conflict:iran-events:v1';
+const REGION_CONFIG = loadRegionConfig('IR');
 
 // ─── Notification publishing ─────────────────────────────────────────────────
 // Mirrors seed-aviation.mjs::publishNotificationEvent (itself mirroring
@@ -127,7 +128,7 @@ async function fetchIranEvents() {
   console.log(`  Raw events: ${events.length}`);
 
   const mapped = events.map(e => {
-    const geo = geolocate(e.title);
+    const geo = geolocate(e.title, REGION_CONFIG);
     const cat = CATEGORY_MAP[e.category] || 'general';
     return {
       id: e.id,
