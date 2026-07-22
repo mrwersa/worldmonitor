@@ -45,8 +45,8 @@ services:
       DEV_PORT: "3000"
       UPSTASH_REDIS_REST_URL: "http://redis-rest:80"
       UPSTASH_REDIS_REST_TOKEN: "${REDIS_TOKEN:?REDIS_TOKEN required — generate with: openssl rand -hex 32}"
-      WM_SELF_HOST: "${WM_SELF_HOST:-}"
-      VITE_SELF_HOST: "${WM_SELF_HOST:-}"
+      WM_SELF_HOST: "${WM_SELF_HOST:-1}"
+      VITE_SELF_HOST: "${WM_SELF_HOST:-1}"
       WS_RELAY_URL: "http://ais-relay:3004"
       # LLM provider (any OpenAI-compatible endpoint)
       LLM_API_URL: "${LLM_API_URL:-}"

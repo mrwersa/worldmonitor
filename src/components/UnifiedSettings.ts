@@ -469,6 +469,7 @@ export class UnifiedSettings {
       isSignedIn,
     });
     const showNotificationsTab = !this.config.isDesktopApp;
+    const showMcpClientsTab = !isSelfHost && hasFeature('mcpAccess');
     const notifs = showNotificationsTab
       ? renderNotificationsSettings({ isSignedIn })
       : null;
@@ -484,8 +485,8 @@ export class UnifiedSettings {
           <button class="${tabClass('panels')}" data-tab="panels" role="tab" aria-selected="${this.activeTab === 'panels'}" id="us-tab-panels" aria-controls="us-tab-panel-panels">${t('header.tabPanels')}</button>
           <button class="${tabClass('sources')}" data-tab="sources" role="tab" aria-selected="${this.activeTab === 'sources'}" id="us-tab-sources" aria-controls="us-tab-panel-sources">${t('header.tabSources')}</button>
           ${showNotificationsTab ? `<button class="${tabClass('notifications')}" data-tab="notifications" role="tab" aria-selected="${this.activeTab === 'notifications'}" id="us-tab-notifications" aria-controls="us-tab-panel-notifications">${t('header.tabNotifications')}</button>` : ''}
-          <button class="${tabClass('api-keys')}" data-tab="api-keys" role="tab" aria-selected="${this.activeTab === 'api-keys'}" id="us-tab-api-keys" aria-controls="us-tab-panel-api-keys">API Keys <span class="panel-pro-badge">PRO</span></button>
-          ${hasFeature('mcpAccess') ? `<button class="${tabClass('mcp-clients')}" data-tab="mcp-clients" role="tab" aria-selected="${this.activeTab === 'mcp-clients'}" id="us-tab-mcp-clients" aria-controls="us-tab-panel-mcp-clients">MCP Clients <span class="panel-pro-badge">PRO</span></button>` : ''}
+          <button class="${tabClass('api-keys')}" data-tab="api-keys" role="tab" aria-selected="${this.activeTab === 'api-keys'}" id="us-tab-api-keys" aria-controls="us-tab-panel-api-keys">API Keys ${isSelfHost ? '' : '<span class="panel-pro-badge">PRO</span>'}</button>
+          ${showMcpClientsTab ? `<button class="${tabClass('mcp-clients')}" data-tab="mcp-clients" role="tab" aria-selected="${this.activeTab === 'mcp-clients'}" id="us-tab-mcp-clients" aria-controls="us-tab-panel-mcp-clients">MCP Clients <span class="panel-pro-badge">PRO</span></button>` : ''}
         </div>
         <div class="unified-settings-tab-panel${this.activeTab === 'settings' ? ' active' : ''}" data-panel-id="settings" id="us-tab-panel-settings" role="tabpanel" aria-labelledby="us-tab-settings">
           ${prefs.html}
@@ -527,7 +528,7 @@ export class UnifiedSettings {
         <div class="unified-settings-tab-panel${this.activeTab === 'api-keys' ? ' active' : ''}" data-panel-id="api-keys" id="us-tab-panel-api-keys" role="tabpanel" aria-labelledby="us-tab-api-keys">
           ${this.renderApiKeysContent()}
         </div>
-        ${hasFeature('mcpAccess') ? `
+        ${showMcpClientsTab ? `
         <div class="unified-settings-tab-panel${this.activeTab === 'mcp-clients' ? ' active' : ''}" data-panel-id="mcp-clients" id="us-tab-panel-mcp-clients" role="tabpanel" aria-labelledby="us-tab-mcp-clients">
           ${this.renderMcpClientsContent()}
         </div>
@@ -570,7 +571,7 @@ export class UnifiedSettings {
     if (this.activeTab === 'api-keys' && getAuthState().user && hasFeature('apiAccess')) {
       void this.loadApiKeys();
     }
-    if (this.activeTab === 'mcp-clients' && getAuthState().user && hasFeature('mcpAccess')) {
+    if (!isSelfHost && this.activeTab === 'mcp-clients' && getAuthState().user && hasFeature('mcpAccess')) {
       void this.loadMcpClients();
       this.startMcpQuotaPolling();
     }
@@ -594,7 +595,7 @@ export class UnifiedSettings {
       void this.loadApiKeys();
     }
 
-    if (tab === 'mcp-clients' && getAuthState().user && hasFeature('mcpAccess')) {
+    if (!isSelfHost && tab === 'mcp-clients' && getAuthState().user && hasFeature('mcpAccess')) {
       void this.loadPlanLimitNotices();
       void this.loadMcpClients();
       this.startMcpQuotaPolling();
@@ -811,7 +812,7 @@ export class UnifiedSettings {
         <div class="panel-toggle-item ${panel.enabled && !locked ? 'active' : ''}${changed ? ' changed' : ''}${locked ? ' pro-locked' : ''}" data-panel="${escapeHtml(key)}" aria-pressed="${panel.enabled && !locked}" ${locked ? 'data-pro-locked="1"' : ''}>
           <div class="panel-toggle-checkbox">${panel.enabled && !locked ? '\u2713' : ''}${locked ? '\uD83D\uDD12' : ''}</div>
           <span class="panel-toggle-label">${escapeHtml(displayName)}</span>
-          ${(locked || resolvedPanel.premium) ? '<span class="panel-toggle-pro-badge">PRO</span>' : ''}
+          ${(locked || (resolvedPanel.premium && !pro)) ? '<span class="panel-toggle-pro-badge">PRO</span>' : ''}
         </div>
       `;
     }).join(''), "legacy direct innerHTML migration"));

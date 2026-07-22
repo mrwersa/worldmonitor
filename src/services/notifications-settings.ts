@@ -20,6 +20,7 @@ import {
 } from '@/services/notification-channels';
 import { getCurrentClerkUser } from '@/services/clerk';
 import { hasTier } from '@/services/entitlements';
+import { isSelfHost } from '@/services/self-host';
 import { getMarketWatchlistEntries } from '@/services/market-watchlist';
 import { SITE_VARIANT } from '@/config/variant';
 import { mountCountryChipPicker, loadFollowedCountriesSafe, type CountryChipPickerHandle } from '@/utils/country-chip-picker';
@@ -88,7 +89,15 @@ export function renderNotificationsSettings(host: NotificationsSettingsHost): No
   const preselectCountry = normalizePreselectCountry(host.preselectCountry);
 
   let html = '';
-  if (isPro) {
+  if (isSelfHost) {
+    // Notification channel CRUD still persists through Clerk + Convex and
+    // cannot work anonymously just because entitlement checks are bypassed.
+    // Be explicit instead of showing a false Pro paywall or an unlocked form
+    // whose first request deterministically fails authentication.
+    html += `<div class="wm-pref-group-content wm-notif-tab-content">`;
+    html += `<div class="ai-flow-toggle-desc"><strong>Self-host notification delivery is not configured yet.</strong> Channel and alert-rule persistence currently depends on the hosted Clerk/Convex service. The rest of self-host mode remains fully unlocked; local notification persistence is tracked as follow-up work.</div>`;
+    html += `</div>`;
+  } else if (isPro) {
     html += `<div class="wm-pref-group-content wm-notif-tab-content">`;
     html += `<div class="us-notif-loading" id="usNotifLoading">Loading...</div>`;
     html += `<div class="us-notif-content" id="usNotifContent" style="display:none"></div>`;
@@ -105,6 +114,8 @@ export function renderNotificationsSettings(host: NotificationsSettingsHost): No
     attach(container: HTMLElement): () => void {
       const ac = new AbortController();
       const { signal } = ac;
+
+      if (isSelfHost) return () => ac.abort();
 
       if (!isPro) {
         const upgradeBtn = container.querySelector<HTMLButtonElement>('#usNotifUpgradeBtn');
