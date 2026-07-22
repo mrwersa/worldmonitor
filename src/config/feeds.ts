@@ -91,6 +91,7 @@ export const SOURCE_TYPES: Record<string, SourceType> = {
   'Arms Control Assn': 'intel', 'Bulletin of Atomic Scientists': 'intel',
   // Food Security & Regional
   'FAO GIEWS': 'gov', 'EU ISS': 'intel',
+  'IRNA Persian': 'wire', 'Mehr News Persian': 'mainstream', 'ISNA Persian': 'mainstream',
   // Investigative journalism & accountability
   'OCCRP': 'intel', 'DFRLab': 'intel', 'Lighthouse Reports': 'intel', 'The Sentry': 'intel', 'GITOC': 'intel', 'VSquare': 'intel', 'Correctiv': 'intel',
   // New verified think tanks
@@ -132,6 +133,9 @@ export const SOURCE_PROPAGANDA_RISK: Record<string, SourceRiskProfile> = {
   'Press TV': { risk: 'high', stateAffiliated: 'Iran', note: 'Iranian state media' },
   'IRNA': { risk: 'high', stateAffiliated: 'Iran', note: 'Iranian state news agency (Islamic Republic News Agency)' },
   'Mehr News': { risk: 'high', stateAffiliated: 'Iran', note: 'Iranian state-affiliated, Basij-linked' },
+  'IRNA Persian': { risk: 'high', stateAffiliated: 'Iran', note: 'Persian service of the Iranian state news agency' },
+  'Mehr News Persian': { risk: 'high', stateAffiliated: 'Iran', note: 'Persian service of Iranian state-affiliated, Basij-linked media' },
+  'ISNA Persian': { risk: 'medium', stateAffiliated: 'Iran', note: 'Iranian semi-official student news agency' },
   'KCNA': { risk: 'high', stateAffiliated: 'North Korea', note: 'North Korean state media' },
 
   // Medium risk - State-affiliated or known bias
@@ -312,6 +316,11 @@ const FULL_FEEDS: Record<string, Feed[]> = {
     { name: 'Fars News', url: rss('https://news.google.com/rss/search?q=site:farsnews.ir+when:2d&hl=en-US&gl=US&ceid=US:en') },
     { name: 'IRNA', url: rss('https://en.irna.ir/rss') },
     { name: 'Mehr News', url: rss('https://en.mehrnews.com/rss') },
+    // Publisher-owned Persian feeds; locale-gated so English dashboards keep
+    // the current source mix while fa users receive native-language reporting.
+    { name: 'IRNA Persian', url: rss('https://irna.ir/rss'), lang: 'fa' },
+    { name: 'Mehr News Persian', url: rss('https://www.mehrnews.com/rss'), lang: 'fa' },
+    { name: 'ISNA Persian', url: rss('https://www.isna.ir/rss'), lang: 'fa' },
     { name: 'Haaretz', url: rss('https://news.google.com/rss/search?q=site:haaretz.com+when:7d&hl=en-US&gl=US&ceid=US:en') },
     { name: 'Jerusalem Post', url: rss('https://www.jpost.com/rss/rssfeedsheadlines.aspx') },
     { name: 'Ynetnews', url: rss('https://www.ynetnews.com/Integration/StoryRss3089.xml') },
@@ -1126,7 +1135,7 @@ export const DEFAULT_ENABLED_SOURCES: Record<string, string[]> = {
   politics: ['BBC World', 'Guardian World', 'AP News', 'Reuters World', 'CNN World'],
   us: ['Reuters US', 'NPR News', 'PBS NewsHour', 'ABC News', 'CBS News', 'NBC News', 'Wall Street Journal', 'Politico', 'The Hill'],
   europe: ['France 24', 'EuroNews', 'Le Monde', 'DW News', 'Tagesschau', 'ANSA', 'NOS Nieuws', 'SVT Nyheter', 'Balkan Insight'],
-  middleeast: ['BBC Middle East', 'Al Jazeera', 'Al Arabiya', 'Guardian ME', 'BBC Persian', 'Iran International', 'IRNA', 'Mehr News', 'Haaretz', 'Jerusalem Post', 'Ynetnews', 'Asharq News', 'The National'],
+  middleeast: ['BBC Middle East', 'Al Jazeera', 'Al Arabiya', 'Guardian ME', 'BBC Persian', 'Iran International', 'IRNA', 'Mehr News', 'IRNA Persian', 'Mehr News Persian', 'ISNA Persian', 'Haaretz', 'Jerusalem Post', 'Ynetnews', 'Asharq News', 'The National'],
   africa: ['BBC Africa', 'News24', 'Africanews', 'Jeune Afrique', 'Africa News', 'Premium Times', 'Channels TV', 'Sahel Crisis'],
   latam: ['BBC Latin America', 'Reuters LatAm', 'InSight Crime', 'Mexico News Daily', 'Clarín', 'Primicias', 'Infobae Americas', 'El Universo'],
   asia: ['BBC Asia', 'The Diplomat', 'South China Morning Post', 'Reuters Asia', 'Nikkei Asia', 'CNA', 'Asia News', 'The Hindu'],

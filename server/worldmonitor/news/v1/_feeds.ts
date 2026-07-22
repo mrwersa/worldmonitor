@@ -67,6 +67,9 @@ export const VARIANT_FEEDS: Record<string, Record<string, ServerFeed[]>> = {
       { name: 'Guardian ME', url: 'https://www.theguardian.com/world/middleeast/rss' },
       { name: 'Oman Observer', url: 'https://www.omanobserver.om/rssFeed/1' },
       { name: 'BBC Persian', url: 'https://feeds.bbci.co.uk/persian/rss.xml', lang: 'fa' },
+      { name: 'IRNA Persian', url: 'https://irna.ir/rss', lang: 'fa' },
+      { name: 'Mehr News Persian', url: 'https://www.mehrnews.com/rss', lang: 'fa' },
+      { name: 'ISNA Persian', url: 'https://www.isna.ir/rss', lang: 'fa' },
       { name: 'The National', url: 'https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml' },
     ],
     tech: [
