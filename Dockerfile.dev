@@ -1,0 +1,40 @@
+# =============================================================================
+# World Monitor — Dev image (hot reload)
+# =============================================================================
+# Runs the same `npm run dev` (Vite dev server + HMR) every contributor
+# already uses outside Docker — no separate build step, no nginx, no
+# supervisord. docker-compose.dev.yml bind-mounts the repo into this
+# container, so editing source on the host is picked up immediately.
+#
+# This is NOT the production image — see Dockerfile for that.
+# =============================================================================
+
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd
+
+WORKDIR /app
+
+# Installed once at image-build time, into the image's own /app/node_modules.
+# docker-compose.dev.yml re-mounts /app/node_modules as an anonymous volume
+# on top of the host bind mount, so this container-native install (matching
+# the container's OS/arch) is what actually runs — not whatever the host
+# happens to have installed, which may be a different platform (e.g. macOS
+# host, Linux container) and would break native deps otherwise.
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+
+EXPOSE 3000
+
+# --host 0.0.0.0: Vite's default (localhost-only) isn't reachable from
+# outside the container.
+#
+# --config vite.config.docker-dev.ts: a thin wrapper (mergeConfig over the
+# real vite.config.ts) that switches file watching to polling mode. Docker
+# Desktop bind mounts don't reliably deliver host filesystem change events
+# into the container's inotify, so the default native-events watcher never
+# fires and HMR silently stops working even though the file content inside
+# the container is correctly up to date. Polling reads mtimes on an
+# interval instead, sidestepping the gap. See that file's header comment.
+#
+# Both flags are CLI-level so the non-Docker `npm run dev` workflow (and
+# its `open: true` browser-launch behavior) stays completely untouched.
+CMD ["npx", "vite", "--config", "vite.config.docker-dev.ts", "--host", "0.0.0.0", "--port", "3000"]

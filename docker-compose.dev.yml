@@ -1,0 +1,73 @@
+# =============================================================================
+# World Monitor — Dev override (hot reload, no rebuild needed)
+# =============================================================================
+# Adds a `worldmonitor-dev` service that runs the Vite dev server (HMR) with
+# the repo bind-mounted, instead of the production nginx+sidecar build in
+# docker-compose.yml. Edits on the host apply immediately in the running
+# container — no `docker compose up --build` after every change.
+#
+# This is a separate service (not an override of `worldmonitor`) so the two
+# never collide on ports/volumes/command, and the production path in
+# docker-compose.yml is completely untouched — run either one independently.
+#
+# Usage:
+#   cp .env.example .env        # add your API keys (same as production)
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+#     up --build worldmonitor-dev redis redis-rest ais-relay
+#
+# The app will be available at http://localhost:3000 with hot reload.
+# First run needs --build (installs deps into the image); after that, plain
+# `up` reuses the image and just picks up your file edits live — rebuild
+# again only when package.json/package-lock.json change.
+# =============================================================================
+
+services:
+
+  worldmonitor-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: worldmonitor:dev
+    container_name: worldmonitor-dev
+    ports:
+      - "${WM_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      # Anonymous volumes: keep the image's own container-native
+      # node_modules (installed for Linux/the container's arch) instead of
+      # letting the bind mount above shadow it with the host's, which may be
+      # a different platform. Vite/esbuild ship OS-specific native binaries,
+      # so a macOS or Windows host node_modules would break inside the
+      # container otherwise.
+      - /app/node_modules
+      - /app/blog-site/node_modules
+    environment:
+      DEV_PORT: "3000"
+      UPSTASH_REDIS_REST_URL: "http://redis-rest:80"
+      UPSTASH_REDIS_REST_TOKEN: "${REDIS_TOKEN:?REDIS_TOKEN required — generate with: openssl rand -hex 32}"
+      WM_SELF_HOST: "${WM_SELF_HOST:-}"
+      VITE_SELF_HOST: "${WM_SELF_HOST:-}"
+      WS_RELAY_URL: "http://ais-relay:3004"
+      # LLM provider (any OpenAI-compatible endpoint)
+      LLM_API_URL: "${LLM_API_URL:-}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      # Data source API keys (optional — features degrade gracefully)
+      AISSTREAM_API_KEY: "${AISSTREAM_API_KEY:-}"
+      FINNHUB_API_KEY: "${FINNHUB_API_KEY:-}"
+      EIA_API_KEY: "${EIA_API_KEY:-}"
+      FRED_API_KEY: "${FRED_API_KEY:-}"
+      ACLED_EMAIL: "${ACLED_EMAIL:-}"
+      ACLED_PASSWORD: "${ACLED_PASSWORD:-}"
+      ACLED_ACCESS_TOKEN: "${ACLED_ACCESS_TOKEN:-}"
+      NASA_FIRMS_API_KEY: "${NASA_FIRMS_API_KEY:-}"
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:-}"
+      AVIATIONSTACK_API: "${AVIATIONSTACK_API:-}"
+      TRAVELPAYOUTS_API_TOKEN: "${TRAVELPAYOUTS_API_TOKEN:-}"
+    depends_on:
+      redis-rest:
+        condition: service_started
+      ais-relay:
+        condition: service_started

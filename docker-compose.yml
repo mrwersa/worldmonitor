@@ -8,6 +8,9 @@
 #   docker compose up -d --build
 #
 # The app will be available at http://localhost:3000
+#
+# For active development with hot reload (no rebuild per change), use
+# docker-compose.dev.yml instead — see its header comment or SELF_HOSTING.md.
 # =============================================================================
 
 services:
