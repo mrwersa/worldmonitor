@@ -12,7 +12,15 @@
  * `VITE_SELF_HOST=1` (build arg → client bundle) in your `.env` / compose file.
  */
 
-const FLAG = import.meta.env.VITE_SELF_HOST as string | undefined;
+// Optional chaining on `env` (not just the property) is deliberate: this
+// module is reachable from esbuild-bundled test harnesses that don't go
+// through Vite's dev/build pipeline (which is what normally populates
+// import.meta.env), so import.meta.env itself can be undefined there, not
+// just VITE_SELF_HOST. A bare `.VITE_SELF_HOST` access crashed every panel
+// test harness that transitively imports entitlements.ts (which imports
+// this module) with "Cannot read properties of undefined" — see the sibling
+// guard pattern in src/config/map-layer-definitions.ts / data-loader.ts.
+const FLAG = import.meta.env?.VITE_SELF_HOST as string | undefined;
 
 /** True when this client build is running in self-host mode. */
 export const isSelfHost: boolean = (() => {
